@@ -13,6 +13,55 @@ let mainWindow
 let tray
 let forceQuit = false
 
+// 单实例检查
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // 当运行第二个实例时，将焦点设置到主窗口
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+
+  // 只有获得单实例锁的应用才启动
+  app.whenReady().then(() => {
+    createWindow()
+    createTray()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  // 窗口关闭后程序仍在托盘中运行，不自动退出
+  app.on('window-all-closed', () => {})
+
+  // 应用退出前清理
+  app.on('before-quit', () => {
+    forceQuit = true
+    if (tray) {
+      tray.destroy()
+      tray = null
+    }
+  })
+
+  // 应用退出事件
+  app.on('will-quit', (e) => {
+    if (!forceQuit) {
+      e.preventDefault()
+    } else {
+      if (tray) {
+        tray.destroy()
+        tray = null
+      }
+    }
+  })
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -74,37 +123,6 @@ function createTray() {
   tray.on('double-click', () => { mainWindow.show(); mainWindow.focus() })
 }
 
-app.whenReady().then(() => {
-  createWindow()
-  createTray()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
-
-// 窗口关闭后程序仍在托盘中运行，不自动退出
-app.on('window-all-closed', () => {})
-
-// 应用退出前清理
-app.on('before-quit', () => {
-  forceQuit = true
-  if (tray) {
-    tray.destroy()
-    tray = null
-  }
-})
-
-// 应用退出事件
-app.on('will-quit', (e) => {
-  if (!forceQuit) {
-    e.preventDefault()
-  } else {
-    if (tray) {
-      tray.destroy()
-      tray = null
-    }
-  }
-})
 
 // Window control IPC
 ipcMain.on('window-minimize', () => mainWindow.minimize())

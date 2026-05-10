@@ -1,6 +1,6 @@
 {
   "name": "safe-vault",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "密码保险箱 - 个人账号密码管理器",
   "author": "SafeVault Team",
   "main": "electron/main.js",
@@ -63,7 +63,14 @@
       "allowToChangeInstallationDirectory": true,
       "allowElevation": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "perMachine": false,
+      "guid": "com.safevault.app",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "language": "2052",
+      "multiLanguageInstaller": false,
+      "displayLanguageSelector": false
     }
   }
 }
