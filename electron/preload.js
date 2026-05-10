@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleMaximize: () => ipcRenderer.send('window-toggle-maximize'),
   close: () => ipcRenderer.send('window-close'),
   toggleAlwaysOnTop: (value) => ipcRenderer.send('window-toggle-top', value),
+  getWindowState: () => ipcRenderer.invoke('get-window-state'),
 
   // File operations
   readData: () => ipcRenderer.invoke('read-data'),

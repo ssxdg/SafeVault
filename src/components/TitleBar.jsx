@@ -1,16 +1,34 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
 function TitleBar() {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
+  const [isMaximized, setIsMaximized] = useState(false)
+
+  // 同步窗口状态
+  useEffect(() => {
+    const updateWindowState = async () => {
+      if (window.electronAPI?.getWindowState) {
+        const state = await window.electronAPI.getWindowState()
+        setIsAlwaysOnTop(state.isAlwaysOnTop)
+        setIsFullScreen(state.isFullScreen)
+        setIsMaximized(state.isMaximized)
+      }
+    }
+
+    updateWindowState()
+    // 定期同步状态
+    const interval = setInterval(updateWindowState, 500)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleMinimize = () => window.electronAPI?.minimize()
 
   const handleToggleMax = () => {
     window.electronAPI?.toggleMaximize()
-    setIsFullScreen(prev => !prev)
+    // 状态会通过定期同步更新
   }
 
   const handleClose = () => window.electronAPI?.close()
@@ -33,13 +51,20 @@ function TitleBar() {
           onClick={handleToggleTop}
           title={isAlwaysOnTop ? '取消置顶' : '置顶'}
         >
-          📌
+         📌
         </button>
         <button className="titlebar-btn" onClick={handleMinimize} title="最小化">
           ─
         </button>
-        <button className="titlebar-btn" onClick={handleToggleMax} title={isFullScreen ? '还原' : '全屏'}>
-          <img src={fullscreenIcon} className="titlebar-btn-icon" alt="fullscreen" />
+        <button 
+          className="titlebar-btn" 
+          onClick={handleToggleMax} 
+          title={
+            isFullScreen ? '退出全屏' : 
+            isMaximized ? '还原' : '最大化'
+          }
+        >
+          {isFullScreen ? '🗖' : isMaximized ? '🗗' : '🗖'}
         </button>
         <button className="titlebar-btn close-btn" onClick={handleClose} title="关闭">
           ✕

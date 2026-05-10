@@ -24,16 +24,13 @@ function Modal({ modal, onSave, onClose }) {
     onSave(form)
   }
 
-  const handleOverlayClick = (e) => {
-    if (e.target === e.currentTarget) onClose()
-  }
-
+  
   const title = isAccount
     ? (isEdit ? '编辑账号密码' : '添加账号密码')
     : (isEdit ? '编辑网址' : '添加网址')
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
+    <div className="modal-overlay">
       <div className="modal">
         <div className="modal-header">
           <span className="modal-title">{title}</span>

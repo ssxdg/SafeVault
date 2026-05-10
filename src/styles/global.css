@@ -14,6 +14,15 @@ body {
   overflow: hidden;
 }
 
+/* 允许表格和卡片中的文本选择 */
+.ant-table,
+.ant-table-cell,
+.card,
+.card-body,
+.row-value {
+  user-select: text !important;
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
@@ -109,7 +118,12 @@ body {
   font-family: "Segoe UI", sans-serif;
 }
 .titlebar-btn:hover { background: rgba(255,255,255,0.1); color: #E2E8F0; }
-.titlebar-btn.active { color: #60A5FA; }
+.titlebar-btn.active { 
+  color: #60A5FA; 
+  background: rgba(96, 165, 250, 0.15);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 8px rgba(96, 165, 250, 0.2);
+}
 .titlebar-btn.close-btn:hover { background: #EF4444; color: white; }
 
 /* ===== Sidebar ===== */
@@ -268,6 +282,33 @@ body {
 .search-input:focus { border-color: #2563EB; background: white; box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
 .search-input::placeholder { color: #94A3B8; }
 
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  background: #F1F5F9;
+  border-radius: 6px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.view-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  color: #64748B;
+}
+
+.view-btn:hover { background: #E2E8F0; color: #1E293B; }
+.view-btn.active { background: white; color: #2563EB; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
 .content-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 .content-scroll {
@@ -301,6 +342,7 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
 }
+
 
 /* ===== Cards ===== */
 .card {

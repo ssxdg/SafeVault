@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Table, Button, Space, Popconfirm } from 'antd'
 import AccountCard from './AccountCard'
 import UrlCard from './UrlCard'
 import Modal from './Modal'
@@ -10,6 +11,7 @@ function ContentArea({
   showStatus,
 }) {
   const [searchQuery, setSearchQuery] = useState('')
+  const [viewMode, setViewMode] = useState('card') // 'card' | 'list'
   const [modal, setModal] = useState(null)
   // modal shape: { type: 'account'|'url', mode: 'add'|'edit', data: {} }
 
@@ -47,6 +49,128 @@ function ContentArea({
     setModal(null)
   }
 
+  const copy = (text, label) => {
+    if (!text) return
+    navigator.clipboard.writeText(text).then(() => showStatus(`已复制${label}到剪贴板`))
+  }
+
+  const accountColumns = [
+    {
+      title: '账户名称',
+      dataIndex: 'accountName',
+      key: 'accountName',
+      width: 120,
+      ellipsis: true,
+      render: (text) => text || '未命名账号'
+    },
+    {
+      title: '账号',
+      dataIndex: 'username',
+      key: 'username',
+      width: 140,
+      ellipsis: true,
+      render: (text) => text || '-'
+    },
+    {
+      title: '密码',
+      dataIndex: 'password',
+      key: 'password',
+      width: 100,
+      ellipsis: true,
+      render: (text) => text ? '••••••••' : '-'
+    },
+    {
+      title: '邮箱',
+      dataIndex: 'email',
+      key: 'email',
+      width: 160,
+      ellipsis: true,
+      render: (text) => text || '-'
+    },
+    {
+      title: '登录网址',
+      dataIndex: 'loginUrl',
+      key: 'loginUrl',
+      width: 200,
+      ellipsis: true,
+      render: (text) => text ? (
+        <a 
+          href="#" 
+          onClick={(e) => {
+            e.preventDefault()
+            if (window.electronAPI) window.electronAPI.openUrl(text)
+            else window.open(text, '_blank', 'noopener')
+          }}
+          style={{ color: '#2563EB', textDecoration: 'none' }}
+          onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+          onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+        >
+          {text}
+        </a>
+      ) : '-'
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 280,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space size={4}>
+          <Button 
+            type="link"
+            size="small"
+            icon={<span>📋</span>}
+            onClick={() => copy(record.username, '账号')}
+            disabled={!record.username}
+            title="复制账号"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            账号
+          </Button>
+          <Button 
+            type="link"
+            size="small"
+            icon={<span>🔑</span>}
+            onClick={() => copy(record.password, '密码')}
+            disabled={!record.password}
+            title="复制密码"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            密码
+          </Button>
+          <Button 
+            type="link"
+            size="small"
+            icon={<span>✏️</span>}
+            onClick={() => setModal({ type: 'account', mode: 'edit', data: record })}
+            title="编辑"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            编辑
+          </Button>
+          <Popconfirm
+            title="确定要删除这个账号吗？"
+            onConfirm={() => onDeleteAccount(record.id)}
+            okText="确定"
+            cancelText="取消"
+            placement="topRight"
+          >
+            <Button 
+              type="link"
+              size="small"
+              danger
+              icon={<span>🗑️</span>}
+              title="删除"
+              style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
+      )
+    }
+  ]
+
   const hasContent = filteredAccounts.length > 0 || filteredUrls.length > 0
 
   return (
@@ -59,6 +183,22 @@ function ContentArea({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <div className="view-toggle">
+          <button
+            className={`view-btn ${viewMode === 'card' ? 'active' : ''}`}
+            onClick={() => setViewMode('card')}
+            title="卡片视图"
+          >
+            📇
+          </button>
+          <button
+            className={`view-btn ${viewMode === 'list' ? 'active' : ''}`}
+            onClick={() => setViewMode('list')}
+            title="列表视图"
+          >
+            📋
+          </button>
+        </div>
         <div className="content-actions">
           <button
             className="btn btn-primary btn-sm"
@@ -85,17 +225,30 @@ function ContentArea({
             {filteredAccounts.length > 0 && (
               <div className="card-section">
                 <div className="section-title">账号密码</div>
-                <div className="card-grid">
-                  {filteredAccounts.map(acc => (
-                    <AccountCard
-                      key={acc.id}
-                      account={acc}
-                      onEdit={() => setModal({ type: 'account', mode: 'edit', data: acc })}
-                      onDelete={() => onDeleteAccount(acc.id)}
-                      showStatus={showStatus}
-                    />
-                  ))}
-                </div>
+                {viewMode === 'card' ? (
+                  <div className="card-grid">
+                    {filteredAccounts.map(acc => (
+                      <AccountCard
+                        key={acc.id}
+                        account={acc}
+                        viewMode={viewMode}
+                        onEdit={() => setModal({ type: 'account', mode: 'edit', data: acc })}
+                        onDelete={() => onDeleteAccount(acc.id)}
+                        showStatus={showStatus}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Table
+                    columns={accountColumns}
+                    dataSource={filteredAccounts}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                    scroll={{ x: 1000 }}
+                    style={{ fontSize: '13px' }}
+                  />
+                )}
               </div>
             )}
             {filteredUrls.length > 0 && (

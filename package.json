@@ -10,6 +10,7 @@
     "electron": "electron ."
   },
   "dependencies": {
+    "antd": "^6.3.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -33,14 +34,27 @@
       "electron/**/*"
     ],
     "extraResources": [
-      { "from": "src/images/icon.png", "to": "icon.png" }
+      {
+        "from": "src/images/icon.png",
+        "to": "icon.png"
+      }
     ],
     "win": {
       "icon": "src/images/icon.png",
       "sign": null,
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
