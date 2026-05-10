@@ -25,13 +25,13 @@ npm install
 npm run dev
 ```
 
-启动后将同时运行 Vite 开发服务器（`http://localhost:5173`）和 Electron 窗口，支持热更新。
+启动后将同时运行 Vite 开发服务器（`http://localhost:7331`）和 Electron 窗口，支持热更新。
 
 > **端口被占用时**（上次进程未退出）：
 > ```bash
 > npm run dev:kill
 > ```
-> 会自动释放 5173 端口后重新启动。
+> 会自动释放 7331 端口后重新启动。
 
 ### 仅启动 Electron（已有 Vite 服务时）
 

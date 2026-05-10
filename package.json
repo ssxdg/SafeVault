@@ -2,10 +2,11 @@
   "name": "safe-vault",
   "version": "1.0.0",
   "description": "密码保险箱 - 个人账号密码管理器",
+  "author": "SafeVault Team",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite --port 5173 --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
-    "dev:kill": "npx kill-port 5173 && npm run dev",
+    "dev": "concurrently \"vite --port 7331 --strictPort\" \"wait-on http://localhost:7331 && electron .\"",
+    "dev:kill": "npx kill-port 7331 && npm run dev",
     "build": "vite build && electron-builder",
     "electron": "electron ."
   },
@@ -59,7 +60,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }
