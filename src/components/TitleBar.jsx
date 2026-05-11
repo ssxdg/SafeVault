@@ -43,7 +43,7 @@ function TitleBar() {
     <div className="titlebar">
       <div className="titlebar-left">
         <img src={appIcon} className="titlebar-icon" alt="icon" />
-        <span className="titlebar-title">密码保险箱</span>
+        <span className="titlebar-title">密码保险箱 v{__APP_VERSION__}</span>
       </div>
       <div className="titlebar-controls">
         <button

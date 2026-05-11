@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { Table, Button, Space, Popconfirm } from 'antd'
 import AccountCard from './AccountCard'
 import UrlCard from './UrlCard'
@@ -8,6 +8,7 @@ function ContentArea({
   tab,
   onAddAccount, onUpdateAccount, onDeleteAccount,
   onAddUrl, onUpdateUrl, onDeleteUrl,
+  onIncrementAccountUse, onIncrementUrlUse,
   showStatus,
 }) {
   const [searchQuery, setSearchQuery] = useState('')
@@ -24,19 +25,50 @@ function ContentArea({
   }
 
   const q = searchQuery.toLowerCase()
-  const filteredAccounts = (tab.accounts || []).filter(a =>
-    !q ||
-    a.accountName?.toLowerCase().includes(q) ||
-    a.username?.toLowerCase().includes(q) ||
-    a.email?.toLowerCase().includes(q) ||
-    a.note?.toLowerCase().includes(q)
-  )
-  const filteredUrls = (tab.urls || []).filter(u =>
-    !q ||
-    u.name?.toLowerCase().includes(q) ||
-    u.url?.toLowerCase().includes(q) ||
-    u.note?.toLowerCase().includes(q)
-  )
+
+  // Stable sort order: only recompute when tab or search changes, not on every useCount increment
+  const sortOrderRef = useRef({ accountIds: [], urlIds: [] })
+  const prevTabIdRef = useRef(tab?.id)
+  const prevSearchRef = useRef(searchQuery)
+
+  if (prevTabIdRef.current !== tab?.id || prevSearchRef.current !== searchQuery) {
+    prevTabIdRef.current = tab?.id
+    prevSearchRef.current = searchQuery
+    sortOrderRef.current.accountIds = [...(tab.accounts || [])]
+      .sort((a, b) => (b.useCount || 0) - (a.useCount || 0))
+      .map(a => a.id)
+    sortOrderRef.current.urlIds = [...(tab.urls || [])]
+      .sort((a, b) => (b.useCount || 0) - (a.useCount || 0))
+      .map(u => u.id)
+  }
+
+  const sortByStableOrder = (orderIds) => (a, b) => {
+    const idxA = orderIds.indexOf(a.id)
+    const idxB = orderIds.indexOf(b.id)
+    if (idxA === -1 && idxB === -1) return 0
+    if (idxA === -1) return -1
+    if (idxB === -1) return 1
+    return idxA - idxB
+  }
+
+  const filteredAccounts = (tab.accounts || [])
+    .filter(a =>
+      !q ||
+      a.accountName?.toLowerCase().includes(q) ||
+      a.username?.toLowerCase().includes(q) ||
+      a.email?.toLowerCase().includes(q) ||
+      a.note?.toLowerCase().includes(q)
+    )
+    .sort(sortByStableOrder(sortOrderRef.current.accountIds))
+
+  const filteredUrls = (tab.urls || [])
+    .filter(u =>
+      !q ||
+      u.name?.toLowerCase().includes(q) ||
+      u.url?.toLowerCase().includes(q) ||
+      u.note?.toLowerCase().includes(q)
+    )
+    .sort(sortByStableOrder(sortOrderRef.current.urlIds))
 
   const handleModalSave = (formData) => {
     if (modal.type === 'account') {
@@ -234,6 +266,7 @@ function ContentArea({
                         viewMode={viewMode}
                         onEdit={() => setModal({ type: 'account', mode: 'edit', data: acc })}
                         onDelete={() => onDeleteAccount(acc.id)}
+                        onIncrementUse={() => onIncrementAccountUse(acc.id)}
                         showStatus={showStatus}
                       />
                     ))}
@@ -261,6 +294,7 @@ function ContentArea({
                       urlItem={url}
                       onEdit={() => setModal({ type: 'url', mode: 'edit', data: url })}
                       onDelete={() => onDeleteUrl(url.id)}
+                      onIncrementUse={() => onIncrementUrlUse(url.id)}
                       showStatus={showStatus}
                     />
                   ))}

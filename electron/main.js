@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = require('electron')
 const path = require('path')
 const fileManager = require('./fileManager')
 
@@ -64,7 +64,7 @@ if (!gotTheLock) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
+    width: 1300,
     height: 800,
     minWidth: 700,
     minHeight: 500,
@@ -162,6 +162,10 @@ ipcMain.handle('export-data', async (event, data) => {
 })
 ipcMain.handle('import-data', async () => {
   return await fileManager.importData(mainWindow)
+})
+
+ipcMain.handle('show-message-box', async (event, options) => {
+  return await dialog.showMessageBox(mainWindow, options)
 })
 
 ipcMain.on('open-url', (event, url) => {

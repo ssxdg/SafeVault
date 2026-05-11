@@ -1,12 +1,15 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
 
-function AccountCard({ account, onEdit, onDelete, showStatus }) {
+function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus }) {
   const [showPassword, setShowPassword] = useState(false)
 
   const copy = (text, label) => {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => showStatus(`已复制${label}到剪贴板`))
+    navigator.clipboard.writeText(text).then(() => {
+      showStatus(`已复制${label}到剪贴板`)
+      onIncrementUse?.()
+    })
   }
 
   const handleDelete = (e) => {

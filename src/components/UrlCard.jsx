@@ -1,15 +1,19 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
 
-function UrlCard({ urlItem, onEdit, onDelete, showStatus }) {
+function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus }) {
   const copy = (text, label) => {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => showStatus(`已复制${label}到剪贴板`))
+    navigator.clipboard.writeText(text).then(() => {
+      showStatus(`已复制${label}到剪贴板`)
+      onIncrementUse?.()
+    })
   }
 
   const openUrl = (e) => {
     e.stopPropagation()
     if (!urlItem.url) return
+    onIncrementUse?.()
     if (window.electronAPI) {
       window.electronAPI.openUrl(urlItem.url)
     } else {

@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Open external URL
   openUrl: (url) => ipcRenderer.send('open-url', url),
+
+  // Dialog
+  showMessageBox: (options) => ipcRenderer.invoke('show-message-box', options),
 })

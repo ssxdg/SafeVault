@@ -53,7 +53,7 @@ function App() {
   // --- Tab operations ---
   const addTab = useCallback((name) => {
     const newTab = { id: generateId(), name, accounts: [], urls: [] }
-    const newData = { ...data, tabs: [...data.tabs, newTab] }
+    const newData = { ...data, tabs: [newTab, ...data.tabs] }
     updateData(newData)
     setActiveTabId(newTab.id)
   }, [data, updateData])
@@ -81,11 +81,11 @@ function App() {
   // --- Account operations ---
   const addAccount = useCallback((tabId, account) => {
     const now = new Date().toISOString()
-    const newAcc = { id: generateId(), ...account, createdAt: now, updatedAt: now }
+    const newAcc = { id: generateId(), ...account, useCount: 0, createdAt: now, updatedAt: now }
     updateData({
       ...data,
       tabs: data.tabs.map(t =>
-        t.id === tabId ? { ...t, accounts: [...t.accounts, newAcc] } : t
+        t.id === tabId ? { ...t, accounts: [newAcc, ...t.accounts] } : t
       ),
     })
   }, [data, updateData])
@@ -114,11 +114,11 @@ function App() {
   // --- URL operations ---
   const addUrl = useCallback((tabId, urlItem) => {
     const now = new Date().toISOString()
-    const newUrl = { id: generateId(), ...urlItem, createdAt: now, updatedAt: now }
+    const newUrl = { id: generateId(), ...urlItem, useCount: 0, createdAt: now, updatedAt: now }
     updateData({
       ...data,
       tabs: data.tabs.map(t =>
-        t.id === tabId ? { ...t, urls: [...t.urls, newUrl] } : t
+        t.id === tabId ? { ...t, urls: [newUrl, ...t.urls] } : t
       ),
     })
   }, [data, updateData])
@@ -144,13 +144,49 @@ function App() {
     })
   }, [data, updateData])
 
+  // --- Use count ---
+  const incrementAccountUse = useCallback((tabId, accId) => {
+    updateData({
+      ...data,
+      tabs: data.tabs.map(t =>
+        t.id === tabId
+          ? { ...t, accounts: t.accounts.map(a => a.id === accId ? { ...a, useCount: (a.useCount || 0) + 1 } : a) }
+          : t
+      ),
+    })
+  }, [data, updateData])
+
+  const incrementUrlUse = useCallback((tabId, urlId) => {
+    updateData({
+      ...data,
+      tabs: data.tabs.map(t =>
+        t.id === tabId
+          ? { ...t, urls: t.urls.map(u => u.id === urlId ? { ...u, useCount: (u.useCount || 0) + 1 } : u) }
+          : t
+      ),
+    })
+  }, [data, updateData])
+
   // --- Import / Export ---
   const handleExport = useCallback(async () => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导出')
     const result = await window.electronAPI.exportData(data)
-    if (result.success) showStatus('✓ 导出成功')
-    else if (!result.cancelled) showStatus('导出失败: ' + result.error)
-  }, [data, showStatus])
+    if (result.success) {
+      window.electronAPI.showMessageBox({
+        type: 'info',
+        title: '密码保险箱',
+        message: '导出成功！',
+        buttons: ['确定'],
+      })
+    } else if (!result.cancelled) {
+      window.electronAPI.showMessageBox({
+        type: 'error',
+        title: '密码保险箱',
+        message: '导出失败: ' + result.error,
+        buttons: ['确定'],
+      })
+    }
+  }, [data])
 
   const handleImport = useCallback(async () => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
@@ -158,21 +194,74 @@ function App() {
     if (result.success) {
       const existing = [...data.tabs]
       const imported = result.data.tabs || []
+      let addedAccounts = 0
+      let addedUrls = 0
+      let skippedAccounts = 0
+      let skippedUrls = 0
       for (const tab of imported) {
         const found = existing.find(t => t.name === tab.name)
         if (found) {
-          found.accounts = [...(found.accounts || []), ...(tab.accounts || [])]
-          found.urls = [...(found.urls || []), ...(tab.urls || [])]
+          const existingAccountNames = new Set(
+            (found.accounts || []).map(a => a.accountName?.trim().toLowerCase())
+          )
+          const existingUsernames = new Set(
+            (found.accounts || []).map(a => a.username?.trim().toLowerCase()).filter(Boolean)
+          )
+          const existingUrlNames = new Set(
+            (found.urls || []).map(u => u.name?.trim().toLowerCase())
+          )
+          for (const acc of (tab.accounts || [])) {
+            const nameKey = acc.accountName?.trim().toLowerCase()
+            const userKey = acc.username?.trim().toLowerCase()
+            if (existingAccountNames.has(nameKey) || (userKey && existingUsernames.has(userKey))) {
+              skippedAccounts++
+            } else {
+              found.accounts = [...(found.accounts || []), { ...acc, id: generateId() }]
+              existingAccountNames.add(nameKey)
+              if (userKey) existingUsernames.add(userKey)
+              addedAccounts++
+            }
+          }
+          for (const url of (tab.urls || [])) {
+            if (existingUrlNames.has(url.name?.trim().toLowerCase())) {
+              skippedUrls++
+            } else {
+              found.urls = [...(found.urls || []), { ...url, id: generateId() }]
+              existingUrlNames.add(url.name?.trim().toLowerCase())
+              addedUrls++
+            }
+          }
         } else {
-          existing.push({ ...tab, id: generateId() })
+          const newTab = { ...tab, id: generateId() }
+          addedAccounts += (tab.accounts || []).length
+          addedUrls += (tab.urls || []).length
+          existing.push(newTab)
         }
       }
       updateData({ tabs: existing })
-      showStatus('✓ 导入成功')
+      const parts = [`新增 ${addedAccounts} 个账号，${addedUrls} 个网址`]
+      if (skippedAccounts > 0 || skippedUrls > 0) {
+        const skipParts = []
+        if (skippedAccounts > 0) skipParts.push(`${skippedAccounts} 个账号`)
+        if (skippedUrls > 0) skipParts.push(`${skippedUrls} 个网址`)
+        parts.push(`跳过 ${skipParts.join('、')}（已存在）`)
+      }
+      window.electronAPI.showMessageBox({
+        type: 'info',
+        title: '密码保险箱',
+        message: '导入成功！',
+        detail: parts.join('\n'),
+        buttons: ['确定'],
+      })
     } else if (!result.cancelled) {
-      showStatus('导入失败: ' + result.error)
+      window.electronAPI.showMessageBox({
+        type: 'error',
+        title: '密码保险箱',
+        message: '导入失败: ' + result.error,
+        buttons: ['确定'],
+      })
     }
-  }, [data, updateData, showStatus])
+  }, [data, updateData])
 
   if (!data) {
     return (
@@ -205,6 +294,8 @@ function App() {
           onAddUrl={(url) => addUrl(activeTabId, url)}
           onUpdateUrl={(id, url) => updateUrl(activeTabId, id, url)}
           onDeleteUrl={(id) => deleteUrl(activeTabId, id)}
+          onIncrementAccountUse={(id) => incrementAccountUse(activeTabId, id)}
+          onIncrementUrlUse={(id) => incrementUrlUse(activeTabId, id)}
           showStatus={showStatus}
         />
       </div>
