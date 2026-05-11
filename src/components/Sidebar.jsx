@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 
-function Sidebar({ tabs, activeTabId, onTabSelect, onTabAdd, onTabDelete, onTabRename, onTabReorder }) {
+function Sidebar({ tabs, activeTabId, activeSection, onTabSelect, onNotesSelect, onTabAdd, onTabDelete, onTabRename, onTabReorder, onConfirm }) {
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const [showNewInput, setShowNewInput] = useState(false)
@@ -46,9 +46,14 @@ function Sidebar({ tabs, activeTabId, onTabSelect, onTabAdd, onTabDelete, onTabR
 
   const handleDelete = (e, tabId) => {
     e.stopPropagation()
-    if (window.confirm('确定要删除此标签及其所有数据吗？')) {
-      onTabDelete(tabId)
-    }
+    const tab = tabs.find(t => t.id === tabId)
+    onConfirm({
+      title: '删除标签',
+      message: `确定要删除「${tab?.name || '此标签'}」吗？`,
+      detail: '该标签下的账号密码和网址数据也会一起删除，此操作无法撤销。',
+      confirmText: '删除',
+      type: 'warning',
+    }, () => onTabDelete(tabId))
   }
 
   // Drag & Drop for reorder
@@ -82,10 +87,17 @@ function Sidebar({ tabs, activeTabId, onTabSelect, onTabAdd, onTabDelete, onTabR
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
+        <div
+          className={`sidebar-tab sidebar-notes-btn${activeSection === 'notes' ? ' active' : ''}`}
+          onClick={onNotesSelect}
+        >
+          <span className="tab-name">记事本</span>
+        </div>
+        <div className="sidebar-divider" />
         {tabs.map((tab, index) => (
           <div
             key={tab.id}
-            className={`sidebar-tab${activeTabId === tab.id ? ' active' : ''}${dragOverIndex === index ? ' drag-over' : ''}`}
+            className={`sidebar-tab${activeSection === 'tabs' && activeTabId === tab.id ? ' active' : ''}${dragOverIndex === index ? ' drag-over' : ''}`}
             onClick={() => { if (editingId !== tab.id) onTabSelect(tab.id) }}
             onDoubleClick={(e) => handleDoubleClick(e, tab)}
             draggable

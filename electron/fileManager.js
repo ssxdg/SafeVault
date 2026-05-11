@@ -5,17 +5,55 @@ const path = require('path')
 const DATA_FILE = path.join(app.getPath('userData'), 'safe_vault.json')
 
 const defaultData = {
+  schemaVersion: 2,
   tabs: [
     { id: 'default-tab', name: '个人账户', accounts: [], urls: [] },
   ],
+  notepads: [
+    { id: 'default-note', name: '未命名', content: '', createdAt: '', updatedAt: '' },
+  ],
+  activeNotepadId: 'default-note',
+}
+
+function normalizeData(data) {
+  if (!data || !Array.isArray(data.tabs)) return defaultData
+
+  let notepads = []
+  if (Array.isArray(data.notepads) && data.notepads.length > 0) {
+    notepads = data.notepads.map((note, index) => ({
+      id: note.id || `note-${Date.now()}-${index}`,
+      name: note.name || `记事本 ${index + 1}`,
+      content: note.content || '',
+      createdAt: note.createdAt || '',
+      updatedAt: note.updatedAt || '',
+    }))
+  } else {
+    notepads = [{
+      id: 'default-note',
+      name: '未命名',
+      content: typeof data.notes === 'string' ? data.notes : '',
+      createdAt: '',
+      updatedAt: '',
+    }]
+  }
+
+  const activeNotepadId = notepads.some(n => n.id === data.activeNotepadId)
+    ? data.activeNotepadId
+    : notepads[0].id
+
+  return {
+    schemaVersion: 2,
+    tabs: data.tabs,
+    notepads,
+    activeNotepadId,
+  }
 }
 
 async function readData() {
   try {
     const raw = await fs.readFile(DATA_FILE, 'utf-8')
     const parsed = JSON.parse(raw)
-    if (!parsed || !Array.isArray(parsed.tabs)) return defaultData
-    return parsed
+    return normalizeData(parsed)
   } catch {
     return defaultData
   }
@@ -23,7 +61,10 @@ async function readData() {
 
 async function writeData(data) {
   try {
-    await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8')
+    const normalized = normalizeData(data)
+    const tempFile = `${DATA_FILE}.tmp`
+    await fs.writeFile(tempFile, JSON.stringify(normalized, null, 2), 'utf-8')
+    await fs.rename(tempFile, DATA_FILE)
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }
@@ -38,7 +79,7 @@ async function exportData(mainWindow, data) {
   })
   if (canceled || !filePath) return { success: false, cancelled: true }
   try {
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+    await fs.writeFile(filePath, JSON.stringify(normalizeData(data), null, 2), 'utf-8')
     return { success: true }
   } catch (e) {
     return { success: false, error: e.message }
@@ -55,7 +96,7 @@ async function importData(mainWindow) {
     const raw = await fs.readFile(filePaths[0], 'utf-8')
     const data = JSON.parse(raw)
     if (!data || !Array.isArray(data.tabs)) throw new Error('数据格式不正确')
-    return { success: true, data }
+    return { success: true, data: normalizeData(data) }
   } catch (e) {
     return { success: false, error: e.message }
   }

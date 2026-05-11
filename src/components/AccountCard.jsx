@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
 
-function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus }) {
+function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus, onConfirm }) {
   const [showPassword, setShowPassword] = useState(false)
 
   const copy = (text, label) => {
@@ -14,9 +14,13 @@ function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus }) 
 
   const handleDelete = (e) => {
     e.stopPropagation()
-    if (window.confirm(`确定要删除「${account.accountName || '此账号'}」吗？`)) {
-      onDelete()
-    }
+    onConfirm({
+      title: '删除账号密码',
+      message: `确定要删除「${account.accountName || '此账号'}」吗？`,
+      detail: '删除后该账号密码记录将无法恢复。',
+      confirmText: '删除',
+      type: 'warning',
+    }, onDelete)
   }
 
   return (

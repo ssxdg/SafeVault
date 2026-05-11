@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
 
-function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus }) {
+function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus, onConfirm }) {
+  const [showToken, setShowToken] = useState(false)
+
   const copy = (text, label) => {
     if (!text) return
     navigator.clipboard.writeText(text).then(() => {
@@ -23,9 +25,13 @@ function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus }) {
 
   const handleDelete = (e) => {
     e.stopPropagation()
-    if (window.confirm(`确定要删除「${urlItem.name || '此网址'}」吗？`)) {
-      onDelete()
-    }
+    onConfirm({
+      title: '删除网址',
+      message: `确定要删除「${urlItem.name || '此网址'}」吗？`,
+      detail: '删除后该网址记录将无法恢复。',
+      confirmText: '删除',
+      type: 'warning',
+    }, onDelete)
   }
 
   return (
@@ -66,8 +72,15 @@ function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus }) {
               className="row-value copyable"
               onDoubleClick={() => copy(urlItem.token, 'Token')}
             >
-              {'•'.repeat(Math.min(urlItem.token.length, 20))}
+              {showToken ? urlItem.token : '•'.repeat(Math.min(urlItem.token.length, 20))}
             </span>
+            <button
+              className="copy-btn"
+              onClick={(e) => { e.stopPropagation(); setShowToken(v => !v) }}
+              title={showToken ? '隐藏' : '显示'}
+            >
+              {showToken ? '🙈' : '👁'}
+            </button>
             <button
               className="copy-btn"
               onClick={(e) => { e.stopPropagation(); copy(urlItem.token, 'Token') }}

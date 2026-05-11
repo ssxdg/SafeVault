@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react'
-import { Table, Button, Space, Popconfirm } from 'antd'
+import { Table, Button, Space } from 'antd'
 import AccountCard from './AccountCard'
 import UrlCard from './UrlCard'
 import Modal from './Modal'
@@ -10,6 +10,7 @@ function ContentArea({
   onAddUrl, onUpdateUrl, onDeleteUrl,
   onIncrementAccountUse, onIncrementUrlUse,
   showStatus,
+  onConfirm,
 }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState('card') // 'card' | 'list'
@@ -84,6 +85,26 @@ function ContentArea({
   const copy = (text, label) => {
     if (!text) return
     navigator.clipboard.writeText(text).then(() => showStatus(`已复制${label}到剪贴板`))
+  }
+
+  const confirmDeleteAccount = (account, onDelete) => {
+    onConfirm({
+      title: '删除账号密码',
+      message: `确定要删除「${account.accountName || '此账号'}」吗？`,
+      detail: '删除后该账号密码记录将无法恢复。',
+      confirmText: '删除',
+      type: 'warning',
+    }, onDelete)
+  }
+
+  const confirmDeleteUrl = (urlItem, onDelete) => {
+    onConfirm({
+      title: '删除网址',
+      message: `确定要删除「${urlItem.name || '此网址'}」吗？`,
+      detail: '删除后该网址记录将无法恢复。',
+      confirmText: '删除',
+      type: 'warning',
+    }, onDelete)
   }
 
   const accountColumns = [
@@ -180,24 +201,17 @@ function ContentArea({
           >
             编辑
           </Button>
-          <Popconfirm
-            title="确定要删除这个账号吗？"
-            onConfirm={() => onDeleteAccount(record.id)}
-            okText="确定"
-            cancelText="取消"
-            placement="topRight"
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<span>🗑️</span>}
+            title="删除"
+            onClick={() => confirmDeleteAccount(record, () => onDeleteAccount(record.id))}
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
           >
-            <Button 
-              type="link"
-              size="small"
-              danger
-              icon={<span>🗑️</span>}
-              title="删除"
-              style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
-            >
-              删除
-            </Button>
-          </Popconfirm>
+            删除
+          </Button>
         </Space>
       )
     }
@@ -268,6 +282,7 @@ function ContentArea({
                         onDelete={() => onDeleteAccount(acc.id)}
                         onIncrementUse={() => onIncrementAccountUse(acc.id)}
                         showStatus={showStatus}
+                        onConfirm={onConfirm}
                       />
                     ))}
                   </div>
@@ -296,6 +311,7 @@ function ContentArea({
                       onDelete={() => onDeleteUrl(url.id)}
                       onIncrementUse={() => onIncrementUrlUse(url.id)}
                       showStatus={showStatus}
+                      onConfirm={onConfirm}
                     />
                   ))}
                 </div>
