@@ -805,13 +805,118 @@ body {
   color: #22C55E;
 }
 
-.notepad-textarea {
+/* ===== Quill Rich Text Editor ===== */
+.notepad-editor-wrap {
   flex: 1;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #F8FAFC;
+}
+
+.notepad-editor-wrap .quill {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow {
   border: none;
-  outline: none;
-  resize: none;
-  padding: 20px;
+  border-bottom: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  padding: 6px 14px;
+  flex-shrink: 0;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-formats {
+  margin-right: 8px;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  padding: 3px;
+  transition: background 0.15s;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button:hover {
+  background: #EFF6FF;
+  color: #2563EB;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button:hover .ql-stroke {
+  stroke: #2563EB;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button:hover .ql-fill {
+  fill: #2563EB;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button.ql-active {
+  background: #EFF6FF;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button.ql-active .ql-stroke {
+  stroke: #2563EB;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow button.ql-active .ql-fill {
+  fill: #2563EB;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker {
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: #475569;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker-label {
+  border: 1px solid #E2E8F0;
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: #F8FAFC;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker-label:hover {
+  background: #EFF6FF;
+  border-color: #93C5FD;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-expanded .ql-picker-label {
+  border-color: #2563EB;
+  background: #EFF6FF;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker-options {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+  padding: 4px;
+  background: white;
+}
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker-item:hover {
+  background: #EFF6FF;
+  border-radius: 4px;
+  color: #2563EB;
+}
+
+.notepad-editor-wrap .ql-container.ql-snow {
+  border: none;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.notepad-editor-wrap .ql-editor {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
   font-size: 15px;
   font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
   line-height: 1.8;
@@ -819,6 +924,115 @@ body {
   background: #F8FAFC;
   user-select: text;
 }
-.notepad-textarea::placeholder {
+
+.notepad-editor-wrap .ql-editor.ql-blank::before {
   color: #94A3B8;
+  font-style: normal;
+  font-size: 15px;
+  left: 24px;
+}
+
+.notepad-editor-wrap .ql-editor h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 8px 0 4px;
+  line-height: 1.4;
+}
+
+.notepad-editor-wrap .ql-editor h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 6px 0 4px;
+  line-height: 1.4;
+}
+
+.notepad-editor-wrap .ql-editor h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin: 4px 0 3px;
+  line-height: 1.4;
+}
+
+.notepad-editor-wrap .ql-editor blockquote {
+  border-left: 3px solid #2563EB;
+  margin: 6px 0;
+  padding: 4px 12px;
+  color: #475569;
+  background: #EFF6FF;
+  border-radius: 0 6px 6px 0;
+}
+
+.notepad-editor-wrap .ql-editor pre.ql-syntax {
+  background: #1E293B;
+  color: #E2E8F0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.notepad-editor-wrap .ql-editor code {
+  background: #F1F5F9;
+  border: 1px solid #E2E8F0;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 13px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  color: #DC2626;
+}
+
+.notepad-editor-wrap .ql-editor a {
+  color: #2563EB;
+  text-decoration: underline;
+}
+
+.notepad-editor-wrap .ql-editor ul,
+.notepad-editor-wrap .ql-editor ol {
+  padding-left: 20px;
+}
+
+.notepad-editor-wrap .ql-tooltip {
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 13px;
+  z-index: 100;
+}
+
+.notepad-editor-wrap .ql-tooltip input[type=text] {
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.notepad-editor-wrap .ql-tooltip input[type=text]:focus {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+
+
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-label::before,
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-item::before {
+  content: '正文';
+}
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-label[data-value='1']::before,
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-item[data-value='1']::before {
+  content: '标题 1';
+}
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-label[data-value='2']::before,
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-item[data-value='2']::before {
+  content: '标题 2';
+}
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-label[data-value='3']::before,
+.notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-item[data-value='3']::before {
+  content: '标题 3';
 }

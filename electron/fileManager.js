@@ -4,6 +4,19 @@ const path = require('path')
 
 const DATA_FILE = path.join(app.getPath('userData'), 'safe_vault.json')
 
+function normalizNoteContent(content) {
+  if (!content) return { ops: [{ insert: '\n' }] }
+  if (typeof content === 'object' && Array.isArray(content.ops)) return content
+  if (typeof content === 'string') {
+    try {
+      const parsed = JSON.parse(content)
+      if (parsed && Array.isArray(parsed.ops)) return parsed
+    } catch {}
+    return { ops: [{ insert: content + '\n' }] }
+  }
+  return { ops: [{ insert: '\n' }] }
+}
+
 const defaultData = {
   schemaVersion: 2,
   tabs: [
@@ -23,15 +36,16 @@ function normalizeData(data) {
     notepads = data.notepads.map((note, index) => ({
       id: note.id || `note-${Date.now()}-${index}`,
       name: note.name || `记事本 ${index + 1}`,
-      content: note.content || '',
+      content: normalizNoteContent(note.content),
       createdAt: note.createdAt || '',
       updatedAt: note.updatedAt || '',
     }))
   } else {
+    const legacyText = typeof data.notes === 'string' ? data.notes : ''
     notepads = [{
       id: 'default-note',
       name: '未命名',
-      content: typeof data.notes === 'string' ? data.notes : '',
+      content: normalizNoteContent(legacyText),
       createdAt: '',
       updatedAt: '',
     }]

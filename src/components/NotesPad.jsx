@@ -1,4 +1,44 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import ReactQuill from 'react-quill-new'
+import 'react-quill-new/dist/quill.snow.css'
+
+function normalizeToDelta(content) {
+  if (!content) return { ops: [{ insert: '\n' }] }
+  if (typeof content === 'object' && Array.isArray(content.ops)) return content
+  if (typeof content === 'string') {
+    try {
+      const parsed = JSON.parse(content)
+      if (parsed && Array.isArray(parsed.ops)) return parsed
+    } catch {}
+    return { ops: [{ insert: content + '\n' }] }
+  }
+  return { ops: [{ insert: '\n' }] }
+}
+
+const TOOLBAR_OPTIONS = [
+  [{ header: [1, 2, 3, false] }],
+  ['bold', 'italic', 'underline'],
+  [{ color: [] }, { background: [] }],
+  [{ list: 'ordered' }, { list: 'bullet' }],
+  ['blockquote', 'code-block'],
+  ['link'],
+  ['clean'],
+]
+
+const TOOLBAR_TITLES = [
+  ['.ql-header', '段落格式'],
+  ['.ql-bold', '粗体（Ctrl+B）'],
+  ['.ql-italic', '斜体（Ctrl+I）'],
+  ['.ql-underline', '下划线（Ctrl+U）'],
+  ['.ql-color .ql-picker-label', '文字颜色'],
+  ['.ql-background .ql-picker-label', '文字高亮'],
+  ['.ql-list[value="ordered"]', '有序列表'],
+  ['.ql-list[value="bullet"]', '无序列表'],
+  ['.ql-blockquote', '引用块'],
+  ['.ql-code-block', '代码块'],
+  ['.ql-link', '插入链接'],
+  ['.ql-clean', '清除格式'],
+]
 
 function NotesPad({
   notepads,
@@ -12,23 +52,25 @@ function NotesPad({
   onAlert,
 }) {
   const activeNote = notepads.find(note => note.id === activeNotepadId) || notepads[0]
-  const [text, setText] = useState(activeNote?.content || '')
+  const [delta, setDelta] = useState(() => normalizeToDelta(activeNote?.content))
   const [saved, setSaved] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const timerRef = useRef(null)
   const pendingSaveRef = useRef(null)
-  const textareaRef = useRef(null)
+  const quillRef = useRef(null)
   const renameInputRef = useRef(null)
+  const activeNoteIdRef = useRef(activeNote?.id)
 
   useEffect(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
     }
-    setText(activeNote?.content || '')
+    activeNoteIdRef.current = activeNote?.id
+    setDelta(normalizeToDelta(activeNote?.content))
     setSaved(true)
-  }, [activeNote?.id, activeNote?.content])
+  }, [activeNote?.id])
 
   useEffect(() => {
     return () => {
@@ -64,28 +106,12 @@ function NotesPad({
     return () => flushPendingSave()
   }, [flushPendingSave])
 
-  const handleChange = (e) => {
-    if (!activeNote) return
-    const value = e.target.value
-    setText(value)
-    scheduleSave(activeNote.id, value)
-  }
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      const textarea = textareaRef.current
-      if (!textarea || !activeNote) return
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newText = text.substring(0, start) + '  ' + text.substring(end)
-      setText(newText)
-      scheduleSave(activeNote.id, newText)
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 2
-      }, 0)
-    }
-  }
+  const handleChange = useCallback((content, delta, source, editor) => {
+    if (!activeNoteIdRef.current) return
+    const currentDelta = editor.getContents()
+    setDelta(currentDelta)
+    scheduleSave(activeNoteIdRef.current, currentDelta)
+  }, [scheduleSave])
 
   const startRename = (e, note) => {
     e.stopPropagation()
@@ -143,6 +169,30 @@ function NotesPad({
     })
   }
 
+  const modules = useMemo(() => ({
+    toolbar: TOOLBAR_OPTIONS,
+  }), [])
+
+  const handleQuillRef = useCallback((el) => {
+    quillRef.current = el
+    if (!el) return
+    setTimeout(() => {
+      const quill = el.getEditor?.()
+      if (!quill) return
+      if (quill.root) {
+        quill.root.setAttribute('spellcheck', 'false')
+        quill.root.spellcheck = false
+      }
+      const toolbar = quill.getModule('toolbar')
+      if (toolbar?.container) {
+        TOOLBAR_TITLES.forEach(([selector, title]) => {
+          const el = toolbar.container.querySelector(selector)
+          if (el) el.setAttribute('title', title)
+        })
+      }
+    }, 0)
+  }, [])
+
   return (
     <div className="notepad">
       <div className="notepad-tabbar">
@@ -187,15 +237,18 @@ function NotesPad({
           {saved ? '已保存' : '未保存'}
         </span>
       </div>
-      <textarea
-        ref={textareaRef}
-        className="notepad-textarea"
-        value={text}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        placeholder="在此输入笔记内容..."
-        spellCheck={false}
-      />
+      <div className="notepad-editor-wrap">
+        <ReactQuill
+          key={activeNote?.id}
+          ref={handleQuillRef}
+          theme="snow"
+          value={delta}
+          onChange={handleChange}
+          modules={modules}
+          placeholder="在此输入笔记内容..."
+          spellCheck={false}
+        />
+      </div>
     </div>
   )
 }

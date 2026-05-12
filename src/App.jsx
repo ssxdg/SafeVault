@@ -358,14 +358,19 @@ function App() {
           existing.push(newTab)
         }
       }
+      const serializeContent = (c) => {
+        if (!c) return ''
+        if (typeof c === 'string') return c
+        try { return JSON.stringify(c) } catch { return '' }
+      }
       const existingNotepads = [...(data.notepads || [])]
       const existingNotepadKeys = new Set(
-        existingNotepads.map(note => `${note.name?.trim().toLowerCase() || ''}\n${note.content || ''}`)
+        existingNotepads.map(note => `${note.name?.trim().toLowerCase() || ''}\n${serializeContent(note.content)}`)
       )
       for (const note of (result.data.notepads || [])) {
         const name = note.name || `记事本 ${existingNotepads.length + 1}`
         const content = note.content || ''
-        const key = `${name.trim().toLowerCase()}\n${content}`
+        const key = `${name.trim().toLowerCase()}\n${serializeContent(content)}`
         if (existingNotepadKeys.has(key)) {
           skippedNotepads++
         } else {
