@@ -1,67 +1,9 @@
 const { app, dialog } = require('electron')
 const fs = require('fs').promises
 const path = require('path')
+const { normalizeData } = require('./dataNormalizer')
 
 const DATA_FILE = path.join(app.getPath('userData'), 'safe_vault.json')
-
-function normalizNoteContent(content) {
-  if (!content) return { ops: [{ insert: '\n' }] }
-  if (typeof content === 'object' && Array.isArray(content.ops)) return content
-  if (typeof content === 'string') {
-    try {
-      const parsed = JSON.parse(content)
-      if (parsed && Array.isArray(parsed.ops)) return parsed
-    } catch {}
-    return { ops: [{ insert: content + '\n' }] }
-  }
-  return { ops: [{ insert: '\n' }] }
-}
-
-const defaultData = {
-  schemaVersion: 2,
-  tabs: [
-    { id: 'default-tab', name: '个人账户', accounts: [], urls: [] },
-  ],
-  notepads: [
-    { id: 'default-note', name: '未命名', content: '', createdAt: '', updatedAt: '' },
-  ],
-  activeNotepadId: 'default-note',
-}
-
-function normalizeData(data) {
-  if (!data || !Array.isArray(data.tabs)) return defaultData
-
-  let notepads = []
-  if (Array.isArray(data.notepads) && data.notepads.length > 0) {
-    notepads = data.notepads.map((note, index) => ({
-      id: note.id || `note-${Date.now()}-${index}`,
-      name: note.name || `记事本 ${index + 1}`,
-      content: normalizNoteContent(note.content),
-      createdAt: note.createdAt || '',
-      updatedAt: note.updatedAt || '',
-    }))
-  } else {
-    const legacyText = typeof data.notes === 'string' ? data.notes : ''
-    notepads = [{
-      id: 'default-note',
-      name: '未命名',
-      content: normalizNoteContent(legacyText),
-      createdAt: '',
-      updatedAt: '',
-    }]
-  }
-
-  const activeNotepadId = notepads.some(n => n.id === data.activeNotepadId)
-    ? data.activeNotepadId
-    : notepads[0].id
-
-  return {
-    schemaVersion: 2,
-    tabs: data.tabs,
-    notepads,
-    activeNotepadId,
-  }
-}
 
 async function readData() {
   try {
@@ -69,7 +11,7 @@ async function readData() {
     const parsed = JSON.parse(raw)
     return normalizeData(parsed)
   } catch {
-    return defaultData
+    return normalizeData(null)
   }
 }
 
@@ -109,7 +51,7 @@ async function importData(mainWindow) {
   try {
     const raw = await fs.readFile(filePaths[0], 'utf-8')
     const data = JSON.parse(raw)
-    if (!data || !Array.isArray(data.tabs)) throw new Error('数据格式不正确')
+    if (!data || !Array.isArray(data.tabs)) throw new Error('Invalid data format')
     return { success: true, data: normalizeData(data) }
   } catch (e) {
     return { success: false, error: e.message }
