@@ -10,6 +10,7 @@ const generateId = () => Date.now().toString(36) + Math.random().toString(36).sl
 
 const createDefaultData = () => ({
   schemaVersion: 2,
+  theme: 'secure',
   tabs: [{ id: generateId(), name: '个人账户', accounts: [], urls: [] }],
   notepads: [{ id: generateId(), name: '未命名', content: '', createdAt: '', updatedAt: '' }],
   activeNotepadId: null,
@@ -43,6 +44,9 @@ function App() {
       }
       if (!loaded.activeNotepadId || !loaded.notepads.some(n => n.id === loaded.activeNotepadId)) {
         loaded.activeNotepadId = loaded.notepads[0].id
+      }
+      if (!['secure', 'compact', 'warm'].includes(loaded.theme)) {
+        loaded.theme = 'secure'
       }
       setData(loaded)
       setActiveTabId(loaded.tabs[0]?.id || null)
@@ -169,6 +173,17 @@ function App() {
     })
   }, [scheduleSave])
 
+  const reorderNotepads = useCallback((newNotepads) => {
+    setData(prev => {
+      const nextActiveId = newNotepads.some(note => note.id === prev.activeNotepadId)
+        ? prev.activeNotepadId
+        : newNotepads[0]?.id || null
+      const newData = { ...prev, notepads: newNotepads, activeNotepadId: nextActiveId }
+      scheduleSave(newData)
+      return newData
+    })
+  }, [scheduleSave])
+
   // --- Tab operations ---
   const addTab = useCallback((name) => {
     const newTab = { id: generateId(), name, accounts: [], urls: [] }
@@ -195,6 +210,11 @@ function App() {
 
   const reorderTabs = useCallback((newTabs) => {
     updateData({ ...data, tabs: newTabs })
+  }, [data, updateData])
+
+  const setTheme = useCallback((theme) => {
+    if (!['secure', 'compact', 'warm'].includes(theme)) return
+    updateData({ ...data, theme })
   }, [data, updateData])
 
   // --- Account operations ---
@@ -386,6 +406,7 @@ function App() {
       }
       updateData({
         ...data,
+        theme: result.data.theme || data.theme || 'secure',
         tabs: existing,
         notepads: existingNotepads,
         activeNotepadId: data.activeNotepadId || existingNotepads[0]?.id || null,
@@ -424,8 +445,8 @@ function App() {
   const activeTab = data.tabs.find(t => t.id === activeTabId)
 
   return (
-    <div className="app">
-      <TitleBar />
+    <div className="app" data-theme={data.theme || 'secure'}>
+      <TitleBar theme={data.theme || 'secure'} onThemeChange={setTheme} />
       <div className="app-body">
         <Sidebar
           tabs={data.tabs}
@@ -448,6 +469,7 @@ function App() {
             onRenameNotepad={renameNotepad}
             onUpdateNotepadContent={updateNotepadContent}
             onDeleteNotepad={deleteNotepad}
+            onReorderNotepads={reorderNotepads}
             onConfirm={showConfirm}
             onAlert={showInfo}
           />
