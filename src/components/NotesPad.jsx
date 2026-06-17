@@ -48,6 +48,7 @@ function NotesPad({
   onRenameNotepad,
   onUpdateNotepadContent,
   onDeleteNotepad,
+  onReorderNotepads,
   onConfirm,
   onAlert,
 }) {
@@ -56,11 +57,13 @@ function NotesPad({
   const [saved, setSaved] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
+  const [dragOverId, setDragOverId] = useState(null)
   const timerRef = useRef(null)
   const pendingSaveRef = useRef(null)
   const quillRef = useRef(null)
   const renameInputRef = useRef(null)
   const activeNoteIdRef = useRef(activeNote?.id)
+  const dragIdRef = useRef(null)
 
   useEffect(() => {
     if (timerRef.current) {
@@ -146,6 +149,42 @@ function NotesPad({
     onAddNotepad()
   }
 
+  const handleDragStart = (e, noteId) => {
+    if (editingId === noteId) return
+    dragIdRef.current = noteId
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e, noteId) => {
+    e.preventDefault()
+    if (dragIdRef.current && dragIdRef.current !== noteId) {
+      setDragOverId(noteId)
+    }
+  }
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault()
+    const sourceId = dragIdRef.current
+    dragIdRef.current = null
+    setDragOverId(null)
+    if (!sourceId || sourceId === targetId) return
+
+    flushPendingSave()
+    const nextNotepads = [...notepads]
+    const fromIndex = nextNotepads.findIndex(note => note.id === sourceId)
+    const toIndex = nextNotepads.findIndex(note => note.id === targetId)
+    if (fromIndex === -1 || toIndex === -1) return
+
+    const [moved] = nextNotepads.splice(fromIndex, 1)
+    nextNotepads.splice(toIndex, 0, moved)
+    onReorderNotepads?.(nextNotepads)
+  }
+
+  const handleDragEnd = () => {
+    dragIdRef.current = null
+    setDragOverId(null)
+  }
+
   const handleDelete = (e, noteId) => {
     e.stopPropagation()
     if (notepads.length <= 1) {
@@ -200,9 +239,14 @@ function NotesPad({
           {notepads.map(note => (
             <div
               key={note.id}
-              className={`notepad-tab${activeNote?.id === note.id ? ' active' : ''}`}
+              className={`notepad-tab${activeNote?.id === note.id ? ' active' : ''}${dragOverId === note.id ? ' drag-over' : ''}`}
               onClick={() => handleSelectNote(note.id)}
               onDoubleClick={(e) => startRename(e, note)}
+              draggable={editingId !== note.id}
+              onDragStart={(e) => handleDragStart(e, note.id)}
+              onDragOver={(e) => handleDragOver(e, note.id)}
+              onDrop={(e) => handleDrop(e, note.id)}
+              onDragEnd={handleDragEnd}
               title="双击重命名"
             >
               {editingId === note.id ? (
