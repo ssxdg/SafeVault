@@ -13,16 +13,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
           if (id.includes('react-quill-new') || id.includes('quill')) return 'vendor-editor'
-          if (id.includes('@ant-design/icons')) return 'vendor-antd-icons'
-          if (id.includes('@ant-design/cssinjs')) return 'vendor-antd-cssinjs'
-          if (id.includes('rc-table') || id.includes('rc-pagination') || id.includes('rc-virtual-list')) return 'vendor-antd-table'
-          if (id.includes('rc-')) return 'vendor-antd-rc'
-          if (id.includes('antd') || id.includes('@ant-design')) return 'vendor-antd'
+          if (id.includes('antd') || id.includes('@ant-design') || id.includes('rc-')) return 'vendor-antd'
           if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) return 'vendor-react'
           return 'vendor'
         },
