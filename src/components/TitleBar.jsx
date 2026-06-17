@@ -3,9 +3,9 @@ import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
 const THEME_OPTIONS = [
-  { value: 'secure', label: 'Secure' },
-  { value: 'compact', label: 'Compact' },
-  { value: 'warm', label: 'Warm' },
+  { value: 'secure', label: '沉稳深海' },
+  { value: 'compact', label: '奶油护眼' },
+  { value: 'warm', label: '冷光赛博' },
 ]
 
 function TitleBar({ theme = 'secure', onThemeChange }) {
@@ -56,7 +56,7 @@ function TitleBar({ theme = 'secure', onThemeChange }) {
           className="theme-select"
           value={theme}
           onChange={(event) => onThemeChange?.(event.target.value)}
-          title="Theme"
+          title="主题"
         >
           {THEME_OPTIONS.map(option => (
             <option key={option.value} value={option.value}>
