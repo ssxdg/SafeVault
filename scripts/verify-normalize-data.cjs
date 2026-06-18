@@ -46,6 +46,18 @@ assert.strictEqual(invalidTheme.theme, 'secure')
 assert.strictEqual(invalidTheme.tabs.length, 1)
 assert.strictEqual(invalidTheme.activeNotepadId, invalidTheme.notepads[0].id)
 
+// 自定义主题只在本机主题库里保存定义，业务数据里只保留 custom:<id> 引用。
+// 这里验证合法引用会被数据归一化保留，避免重启后被错误回退成内置主题。
+const customTheme = normalizeData({ schemaVersion: 2, theme: 'custom:forest-night', tabs: [] })
+assert.strictEqual(customTheme.theme, 'custom:forest-night')
+
+// 非法自定义主题引用不能进入业务数据，防止后续把任意字符串写入 data-theme。
+const invalidCustomTheme = normalizeData({ schemaVersion: 2, theme: 'custom:Secure Theme', tabs: [] })
+assert.strictEqual(invalidCustomTheme.theme, 'secure')
+
+const reservedCustomTheme = normalizeData({ schemaVersion: 2, theme: 'custom:secure', tabs: [] })
+assert.strictEqual(reservedCustomTheme.theme, 'secure')
+
 const missingData = normalizeData(null)
 assert.strictEqual(missingData.theme, 'secure')
 assert.strictEqual(missingData.tabs.length, 1)

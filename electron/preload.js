@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeData: (data) => ipcRenderer.invoke('write-data', data),
   exportData: (data) => ipcRenderer.invoke('export-data', data),
   importData: () => ipcRenderer.invoke('import-data'),
+  readCustomThemes: () => ipcRenderer.invoke('read-custom-themes'),
+  importThemeFile: () => ipcRenderer.invoke('import-theme-file'),
 
   // Open external URL
   openUrl: (url) => ipcRenderer.send('open-url', url),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
@@ -7,6 +7,21 @@ import BottomBar from './components/BottomBar'
 import AppDialog from './components/AppDialog'
 
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2)
+// 内置主题仍然保留为固定选项，自定义主题会在运行时追加到这个列表后面。
+const BUILT_IN_THEME_OPTIONS = [
+  { value: 'secure', label: '沉稳深海' },
+  { value: 'compact', label: '奶油护眼' },
+  { value: 'warm', label: '冷光赛博' },
+]
+const BUILT_IN_THEME_VALUES = new Set(BUILT_IN_THEME_OPTIONS.map(option => option.value))
+const CUSTOM_THEME_PREFIX = 'custom:'
+
+// 业务数据里只保存 custom:<id> 引用，这个工具函数负责从引用中取出本机主题库的 id。
+const getCustomThemeId = (theme) => (
+  typeof theme === 'string' && theme.startsWith(CUSTOM_THEME_PREFIX)
+    ? theme.slice(CUSTOM_THEME_PREFIX.length)
+    : ''
+)
 
 const createDefaultData = () => ({
   schemaVersion: 2,
@@ -18,6 +33,7 @@ const createDefaultData = () => ({
 
 function App() {
   const [data, setData] = useState(null)
+  const [customThemes, setCustomThemes] = useState([])
   const [activeTabId, setActiveTabId] = useState(null)
   const [activeSection, setActiveSection] = useState('tabs')
   const [statusMsg, setStatusMsg] = useState('')
@@ -27,8 +43,17 @@ function App() {
   useEffect(() => {
     const load = async () => {
       let loaded
+      let loadedCustomThemes = []
       if (window.electronAPI) {
-        loaded = await window.electronAPI.readData()
+        // 数据文件和本机主题库互不依赖，并行读取可以减少启动等待时间。
+        const [dataResult, themeResult] = await Promise.all([
+          window.electronAPI.readData(),
+          window.electronAPI.readCustomThemes?.(),
+        ])
+        loaded = dataResult
+        if (themeResult?.success && Array.isArray(themeResult.themes)) {
+          loadedCustomThemes = themeResult.themes
+        }
       }
       if (!loaded || !Array.isArray(loaded.tabs) || loaded.tabs.length === 0) {
         loaded = createDefaultData()
@@ -45,13 +70,29 @@ function App() {
       if (!loaded.activeNotepadId || !loaded.notepads.some(n => n.id === loaded.activeNotepadId)) {
         loaded.activeNotepadId = loaded.notepads[0].id
       }
-      if (!['secure', 'compact', 'warm'].includes(loaded.theme)) {
+      const customThemeId = getCustomThemeId(loaded.theme)
+      const hasCustomTheme = customThemeId && loadedCustomThemes.some(theme => theme.id === customThemeId)
+      if (!BUILT_IN_THEME_VALUES.has(loaded.theme) && !hasCustomTheme) {
         loaded.theme = 'secure'
       }
+      setCustomThemes(loadedCustomThemes)
       setData(loaded)
       setActiveTabId(loaded.tabs[0]?.id || null)
     }
     load()
+  }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        // ESC 必须复用标题栏关闭按钮的同一条 Electron API，保证隐藏到托盘而不是退出应用。
+        event.preventDefault()
+        window.electronAPI?.close()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   const showStatus = useCallback((msg) => {
@@ -213,9 +254,43 @@ function App() {
   }, [data, updateData])
 
   const setTheme = useCallback((theme) => {
-    if (!['secure', 'compact', 'warm'].includes(theme)) return
+    const customThemeId = getCustomThemeId(theme)
+    const isKnownCustomTheme = customThemeId && customThemes.some(item => item.id === customThemeId)
+    if (!BUILT_IN_THEME_VALUES.has(theme) && !isKnownCustomTheme) return
     updateData({ ...data, theme })
-  }, [data, updateData])
+  }, [customThemes, data, updateData])
+
+  const importTheme = useCallback(async () => {
+    if (!window.electronAPI?.importThemeFile) {
+      showStatus('仅 Electron 环境支持导入主题')
+      return
+    }
+
+    const result = await window.electronAPI.importThemeFile()
+    if (result.success && result.theme) {
+      setCustomThemes(prev => {
+        const index = prev.findIndex(theme => theme.id === result.theme.id)
+        if (index === -1) return [...prev, result.theme]
+        const next = [...prev]
+        next[index] = result.theme
+        return next
+      })
+      // 导入成功后立即切换到该主题，让用户能确认主题文件已经生效。
+      updateData({ ...data, theme: `${CUSTOM_THEME_PREFIX}${result.theme.id}` })
+      showInfo({
+        type: 'success',
+        title: '导入主题',
+        message: result.updated ? '主题已更新并应用。' : '主题已导入并应用。',
+        detail: result.theme.name,
+      })
+    } else if (!result.cancelled) {
+      showInfo({
+        type: 'error',
+        title: '导入主题失败',
+        message: result.error || '无法读取主题文件。',
+      })
+    }
+  }, [data, showInfo, showStatus, updateData])
 
   // --- Account operations ---
   const addAccount = useCallback((tabId, account) => {
@@ -404,9 +479,14 @@ function App() {
           addedNotepads++
         }
       }
+      const importedTheme = result.data.theme
+      const importedCustomThemeId = getCustomThemeId(importedTheme)
+      const canUseImportedTheme = BUILT_IN_THEME_VALUES.has(importedTheme) ||
+        (importedCustomThemeId && customThemes.some(theme => theme.id === importedCustomThemeId))
+      // 数据备份不包含本机自定义主题定义；如果备份里只有 custom:<id> 引用但本机没有该主题，就保留当前可用主题。
       updateData({
         ...data,
-        theme: result.data.theme || data.theme || 'secure',
+        theme: canUseImportedTheme ? importedTheme : (data.theme || 'secure'),
         tabs: existing,
         notepads: existingNotepads,
         activeNotepadId: data.activeNotepadId || existingNotepads[0]?.id || null,
@@ -432,7 +512,15 @@ function App() {
         message: '导入失败: ' + result.error,
       })
     }
-  }, [data, updateData, showInfo, showStatus])
+  }, [customThemes, data, updateData, showInfo, showStatus])
+
+  const themeOptions = useMemo(() => [
+    ...BUILT_IN_THEME_OPTIONS,
+    ...customThemes.map(theme => ({
+      value: `${CUSTOM_THEME_PREFIX}${theme.id}`,
+      label: theme.name,
+    })),
+  ], [customThemes])
 
   if (!data) {
     return (
@@ -443,10 +531,20 @@ function App() {
   }
 
   const activeTab = data.tabs.find(t => t.id === activeTabId)
+  const activeCustomThemeId = getCustomThemeId(data.theme)
+  const activeCustomTheme = customThemes.find(theme => theme.id === activeCustomThemeId)
+  // 自定义主题使用 data-theme="custom" 承接通用样式，再把主题变量写到根节点 style 上。
+  const rootTheme = activeCustomTheme ? 'custom' : (data.theme || 'secure')
+  const customThemeVariables = activeCustomTheme?.variables
 
   return (
-    <div className="app" data-theme={data.theme || 'secure'}>
-      <TitleBar theme={data.theme || 'secure'} onThemeChange={setTheme} />
+    <div className="app" data-theme={rootTheme} style={customThemeVariables}>
+      <TitleBar
+        theme={data.theme || 'secure'}
+        themeOptions={themeOptions}
+        onThemeChange={setTheme}
+        onImportTheme={importTheme}
+      />
       <div className="app-body">
         <Sidebar
           tabs={data.tabs}

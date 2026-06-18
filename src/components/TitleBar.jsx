@@ -2,13 +2,7 @@ import React, { useState, useEffect } from 'react'
 import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
-const THEME_OPTIONS = [
-  { value: 'secure', label: '沉稳深海' },
-  { value: 'compact', label: '奶油护眼' },
-  { value: 'warm', label: '冷光赛博' },
-]
-
-function TitleBar({ theme = 'secure', onThemeChange }) {
+function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImportTheme }) {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -58,12 +52,19 @@ function TitleBar({ theme = 'secure', onThemeChange }) {
           onChange={(event) => onThemeChange?.(event.target.value)}
           title="主题"
         >
-          {THEME_OPTIONS.map(option => (
+          {themeOptions.map(option => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
           ))}
         </select>
+        <button
+          className="titlebar-btn"
+          onClick={onImportTheme}
+          title="导入主题文件"
+        >
+          🎨
+        </button>
         <button
           className={`titlebar-btn${isAlwaysOnTop ? ' active' : ''}`}
           onClick={handleToggleTop}

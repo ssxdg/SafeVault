@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = require('electron')
 const path = require('path')
 const fileManager = require('./fileManager')
+const themeManager = require('./themeManager')
+const windowStateManager = require('./windowStateManager')
 
 const isDev = !app.isPackaged
 
@@ -12,6 +14,7 @@ const iconPath = isDev
 let mainWindow
 let tray
 let forceQuit = false
+let saveMainWindowSize = () => {}
 
 // 单实例检查
 const gotTheLock = app.requestSingleInstanceLock()
@@ -42,6 +45,8 @@ if (!gotTheLock) {
 
   // 应用退出前清理
   app.on('before-quit', () => {
+    // 系统关机、托盘退出、应用退出前都先保存一次尺寸，兜底处理未触发 window-close 的情况。
+    saveMainWindowSize()
     forceQuit = true
     if (tray) {
       tray.destroy()
@@ -63,9 +68,23 @@ if (!gotTheLock) {
 }
 
 function createWindow() {
+  const savedWindowSize = windowStateManager.getWindowOptions()
+  let saveWindowSizeTimer = null
+  saveMainWindowSize = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    // 只记录普通窗口尺寸；最大化/全屏时保存会让下次启动尺寸失真。
+    if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return
+    windowStateManager.saveWindowSize(mainWindow.getBounds())
+  }
+  const scheduleSaveWindowSize = () => {
+    if (saveWindowSizeTimer) clearTimeout(saveWindowSizeTimer)
+    // 拖拽调整尺寸会连续触发 resize，防抖写入可以减少磁盘写入次数。
+    saveWindowSizeTimer = setTimeout(saveMainWindowSize, 400)
+  }
+
   mainWindow = new BrowserWindow({
-    width: 1300,
-    height: 800,
+    width: savedWindowSize.width,
+    height: savedWindowSize.height,
     minWidth: 700,
     minHeight: 500,
     frame: false,
@@ -88,10 +107,16 @@ function createWindow() {
 
   // 拦截关闭事件：隐藏到托盘而不退出程序
   mainWindow.on('close', (e) => {
+    saveMainWindowSize()
     if (!forceQuit) {
       e.preventDefault()
       mainWindow.hide()
     }
+  })
+  mainWindow.on('resize', scheduleSaveWindowSize)
+  mainWindow.on('session-end', () => {
+    // Windows 注销/关机时会触发 session-end，立即保存可以覆盖用户不手动关闭进程的场景。
+    saveMainWindowSize()
   })
 }
 
@@ -137,7 +162,11 @@ ipcMain.on('window-toggle-maximize', () => {
   }
 })
 // 标题栏 X 按鈕：隐藏到托盘
-ipcMain.on('window-close', () => mainWindow.hide())
+ipcMain.on('window-close', () => {
+  // 标题栏关闭和 ESC 都会走这个 IPC，隐藏前立即保存尺寸，避免用户刚调整窗口就关闭时丢失尺寸。
+  saveMainWindowSize()
+  mainWindow.hide()
+})
 ipcMain.on('window-toggle-top', (event, alwaysOnTop) => {
   mainWindow.setAlwaysOnTop(alwaysOnTop)
 })
@@ -163,6 +192,12 @@ ipcMain.handle('export-data', async (event, data) => {
 })
 ipcMain.handle('import-data', async () => {
   return await fileManager.importData(mainWindow)
+})
+ipcMain.handle('read-custom-themes', async () => {
+  return await themeManager.readCustomThemes()
+})
+ipcMain.handle('import-theme-file', async () => {
+  return await themeManager.importThemeFile(mainWindow)
 })
 
 ipcMain.handle('show-message-box', async (event, options) => {
