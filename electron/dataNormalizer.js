@@ -1,8 +1,16 @@
 const EMPTY_DELTA = { ops: [{ insert: '\n' }] }
 const VALID_THEMES = new Set(['secure', 'compact', 'warm'])
+const CUSTOM_THEME_PATTERN = /^custom:[a-z][a-z0-9-]{2,31}$/
+const RESERVED_CUSTOM_THEME_IDS = new Set(['secure', 'compact', 'warm', 'custom'])
 
 function normalizeTheme(theme) {
-  return VALID_THEMES.has(theme) ? theme : 'secure'
+  // 自定义主题定义只保存在本机主题库，业务数据里只允许保存 custom:<id> 引用。
+  if (VALID_THEMES.has(theme)) return theme
+  if (CUSTOM_THEME_PATTERN.test(theme)) {
+    const customThemeId = theme.slice('custom:'.length)
+    if (!RESERVED_CUSTOM_THEME_IDS.has(customThemeId)) return theme
+  }
+  return 'secure'
 }
 
 function normalizeNoteContent(content) {
