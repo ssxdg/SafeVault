@@ -498,6 +498,63 @@ body {
   gap: 12px;
 }
 
+/* 账号列表视图使用 Ant Design Table，默认 token 会把表格根节点、表头和固定列渲染成白底。
+   这里统一接入应用已有主题变量，确保三个主题下列表背景、文字、边框和悬停态都跟卡片视图一致。 */
+.app .ant-table-wrapper,
+.app .ant-table,
+.app .ant-table-container,
+.app .ant-table-content {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.app .ant-table-wrapper {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.app .ant-table {
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.app .ant-table-thead > tr > th {
+  background: var(--surface-muted) !important;
+  color: var(--text-muted) !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-weight: 700;
+}
+
+.app .ant-table-tbody > tr > td {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+.app .ant-table-tbody > tr.ant-table-row:hover > td,
+.app .ant-table-tbody > tr > td.ant-table-cell-row-hover {
+  background: var(--active-bg) !important;
+}
+
+.app .ant-table-cell-fix-right,
+.app .ant-table-cell-fix-left {
+  background: inherit !important;
+}
+
+.app .ant-table-wrapper .ant-btn-link {
+  color: var(--accent);
+}
+
+.app .ant-table-wrapper .ant-btn-link:not(:disabled):hover {
+  color: var(--accent-strong);
+}
+
+.app .ant-table-wrapper .ant-btn-link:disabled {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
 
 /* ===== Cards ===== */
 .card {
