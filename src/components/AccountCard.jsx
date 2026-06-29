@@ -6,10 +6,37 @@ function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus, on
 
   const copy = (text, label) => {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => {
-      showStatus(`已复制${label}到剪贴板`)
+    // 剪贴板写入可能被系统权限拒绝，失败时必须提示，避免用户误判敏感信息已复制。
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        showStatus(`已复制${label}到剪贴板`)
+        onIncrementUse?.()
+      })
+      .catch(() => showStatus(`复制${label}失败`))
+  }
+
+  const openLoginUrl = async (e) => {
+    e.stopPropagation()
+    if (!account.loginUrl) return
+    if (window.electronAPI?.openUrl) {
+      const result = await window.electronAPI.openUrl(account.loginUrl)
+      if (result?.success === false) {
+        showStatus(result.error || '无法打开链接')
+        return
+      }
       onIncrementUse?.()
-    })
+      return
+    }
+
+    // 浏览器调试环境没有 Electron 主进程，按同样的 http/https 白名单进行兜底打开。
+    try {
+      const parsed = new URL(account.loginUrl.includes('://') ? account.loginUrl : `https://${account.loginUrl}`)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported protocol')
+      window.open(parsed.toString(), '_blank', 'noopener')
+      onIncrementUse?.()
+    } catch {
+      showStatus('仅支持 http/https 链接')
+    }
   }
 
   const handleDelete = (e) => {
@@ -101,7 +128,7 @@ function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus, on
             <span className="row-label">网址</span>
             <span
               className="row-value url-link"
-              onClick={(e) => { e.stopPropagation(); if (window.electronAPI) window.electronAPI.openUrl(account.loginUrl); else window.open(account.loginUrl, '_blank', 'noopener') }}
+              onClick={openLoginUrl}
               onDoubleClick={() => copy(account.loginUrl, '网址')}
               title={account.loginUrl}
             >

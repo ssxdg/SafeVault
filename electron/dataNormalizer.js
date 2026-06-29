@@ -44,6 +44,14 @@ function stableSortByUseCount(items) {
     .map(({ item }) => item)
 }
 
+function normalizeCollectionItems(items, idPrefix) {
+  // 旧版备份或用户手工维护的 JSON 可能缺少条目 id；这里统一补齐，避免编辑/删除时多个 undefined id 被同时命中。
+  return stableSortByUseCount(items).map((item, index) => ({
+    ...item,
+    id: item?.id || `${idPrefix}-${Date.now()}-${index}`,
+  }))
+}
+
 const defaultData = {
   schemaVersion: 2,
   theme: 'secure',
@@ -61,8 +69,8 @@ function normalizeTabs(tabs) {
   return sourceTabs.map((tab, index) => ({
     id: tab.id || `tab-${Date.now()}-${index}`,
     name: tab.name || `Tab ${index + 1}`,
-    accounts: stableSortByUseCount(tab.accounts),
-    urls: stableSortByUseCount(tab.urls),
+    accounts: normalizeCollectionItems(tab.accounts, 'account'),
+    urls: normalizeCollectionItems(tab.urls, 'url'),
   }))
 }
 

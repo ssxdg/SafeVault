@@ -9,9 +9,13 @@ async function readData() {
   try {
     const raw = await fs.readFile(DATA_FILE, 'utf-8')
     const parsed = JSON.parse(raw)
-    return normalizeData(parsed)
-  } catch {
-    return normalizeData(null)
+    return { success: true, data: normalizeData(parsed) }
+  } catch (e) {
+    // 首次启动时数据文件不存在是正常场景；只有这种情况才返回默认数据，避免损坏文件被静默覆盖。
+    if (e.code === 'ENOENT') return { success: true, data: normalizeData(null), missing: true }
+
+    // 解析失败、权限错误等都交给渲染层提示并进入写保护，保留原始文件供用户恢复。
+    return { success: false, error: e.message }
   }
 }
 

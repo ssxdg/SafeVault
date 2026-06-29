@@ -84,9 +84,10 @@ function NotesPad({
   const scheduleSave = useCallback((noteId, value) => {
     setSaved(false)
     pendingSaveRef.current = { noteId, value }
+    // 先把最新编辑内容同步到 App 内存快照；磁盘写入仍由 App 层防抖，导出/退出前即可拿到最后一次输入。
+    onUpdateNotepadContent(noteId, value)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      onUpdateNotepadContent(noteId, value)
       pendingSaveRef.current = null
       timerRef.current = null
       setSaved(true)
@@ -229,6 +230,12 @@ function NotesPad({
           if (el) el.setAttribute('title', title)
         })
       }
+      // 记事本承诺 Tab 用于缩进；Quill 默认会让焦点跳出编辑器，这里改为插入两个空格。
+      quill.keyboard.addBinding({ key: 9 }, (range) => {
+        quill.insertText(range.index, '  ', 'user')
+        quill.setSelection(range.index + 2, 0, 'silent')
+        return false
+      })
     }, 0)
   }, [])
 

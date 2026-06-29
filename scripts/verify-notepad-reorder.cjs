@@ -9,6 +9,7 @@ assert(source.includes('handleDragStart'), 'NotesPad should define drag start ha
 assert(source.includes('handleDrop'), 'NotesPad should define drop handler')
 assert(source.includes('flushPendingSave()'), 'NotesPad should flush pending save before reorder')
 assert(source.includes('draggable={editingId !== note.id}'), 'notepad tabs should be draggable outside rename mode')
+assert(source.includes('quill.keyboard.addBinding({ key: 9 }'), 'NotesPad should bind Tab to editor indentation')
 assert(css.includes('.notepad-tab.drag-over'), 'drag-over style should exist')
 
 console.log('notepad reorder verification passed')

@@ -16,6 +16,10 @@ function ContentArea({
   const [viewMode, setViewMode] = useState('card') // 'card' | 'list'
   const [modal, setModal] = useState(null)
   // modal shape: { type: 'account'|'url', mode: 'add'|'edit', data: {} }
+  // 排序快照必须在任何条件返回前创建，保证标签被删除到空状态时 React hook 顺序仍保持稳定。
+  const sortOrderRef = useRef({ accountIds: [], urlIds: [] })
+  const prevTabIdRef = useRef(tab?.id)
+  const prevSearchRef = useRef(searchQuery)
 
   if (!tab) {
     return (
@@ -28,10 +32,6 @@ function ContentArea({
   const q = searchQuery.toLowerCase()
 
   // Stable sort order: only recompute when tab or search changes, not on every useCount increment
-  const sortOrderRef = useRef({ accountIds: [], urlIds: [] })
-  const prevTabIdRef = useRef(tab?.id)
-  const prevSearchRef = useRef(searchQuery)
-
   if (prevTabIdRef.current !== tab?.id || prevSearchRef.current !== searchQuery) {
     prevTabIdRef.current = tab?.id
     prevSearchRef.current = searchQuery
@@ -82,9 +82,38 @@ function ContentArea({
     setModal(null)
   }
 
-  const copy = (text, label) => {
+  const copy = (text, label, onCopied) => {
     if (!text) return
-    navigator.clipboard.writeText(text).then(() => showStatus(`已复制${label}到剪贴板`))
+    // 剪贴板 API 可能因系统权限失败，失败时给出状态提示，避免用户误以为已经复制成功。
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        showStatus(`已复制${label}到剪贴板`)
+        onCopied?.()
+      })
+      .catch(() => showStatus(`复制${label}失败`))
+  }
+
+  const openExternalUrl = async (url, onOpened) => {
+    if (!url) return
+    if (window.electronAPI?.openUrl) {
+      const result = await window.electronAPI.openUrl(url)
+      if (result?.success === false) {
+        showStatus(result.error || '无法打开链接')
+        return
+      }
+      onOpened?.()
+      return
+    }
+
+    // 浏览器调试环境没有 Electron 主进程，仍按 http/https 白名单打开，保持和桌面端行为接近。
+    try {
+      const parsed = new URL(url.includes('://') ? url : `https://${url}`)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported protocol')
+      window.open(parsed.toString(), '_blank', 'noopener')
+      onOpened?.()
+    } catch {
+      showStatus('仅支持 http/https 链接')
+    }
   }
 
   const confirmDeleteAccount = (account, onDelete) => {
@@ -146,13 +175,12 @@ function ContentArea({
       key: 'loginUrl',
       width: 200,
       ellipsis: true,
-      render: (text) => text ? (
+      render: (text, record) => text ? (
         <a 
           href="#" 
           onClick={(e) => {
             e.preventDefault()
-            if (window.electronAPI) window.electronAPI.openUrl(text)
-            else window.open(text, '_blank', 'noopener')
+            openExternalUrl(text, () => onIncrementAccountUse(record.id))
           }}
           style={{ color: '#2563EB', textDecoration: 'none' }}
           onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
@@ -173,7 +201,7 @@ function ContentArea({
             type="link"
             size="small"
             icon={<span>📋</span>}
-            onClick={() => copy(record.username, '账号')}
+            onClick={() => copy(record.username, '账号', () => onIncrementAccountUse(record.id))}
             disabled={!record.username}
             title="复制账号"
             style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
@@ -184,7 +212,7 @@ function ContentArea({
             type="link"
             size="small"
             icon={<span>🔑</span>}
-            onClick={() => copy(record.password, '密码')}
+            onClick={() => copy(record.password, '密码', () => onIncrementAccountUse(record.id))}
             disabled={!record.password}
             title="复制密码"
             style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
@@ -215,6 +243,119 @@ function ContentArea({
         </Space>
       )
     }
+  ]
+
+  // 网址列表视图与账号列表视图保持同一套交互能力：打开、复制、编辑、删除和使用次数统计都可用。
+  const urlColumns = [
+    {
+      title: '网站名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 140,
+      ellipsis: true,
+      render: (text) => text || '未命名网址',
+    },
+    {
+      title: '网址',
+      dataIndex: 'url',
+      key: 'url',
+      width: 260,
+      ellipsis: true,
+      render: (text, record) => text ? (
+        <a
+          href="#"
+          onClick={(e) => {
+            e.preventDefault()
+            openExternalUrl(text, () => onIncrementUrlUse(record.id))
+          }}
+          style={{ color: '#2563EB', textDecoration: 'none' }}
+          onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+          onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+        >
+          {text}
+        </a>
+      ) : '-',
+    },
+    {
+      title: 'Token / Key',
+      dataIndex: 'token',
+      key: 'token',
+      width: 160,
+      ellipsis: true,
+      render: (text) => text ? '••••••••' : '-',
+    },
+    {
+      title: '备注',
+      dataIndex: 'note',
+      key: 'note',
+      width: 180,
+      ellipsis: true,
+      render: (text) => text || '-',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 320,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space size={4}>
+          <Button
+            type="link"
+            size="small"
+            icon={<span>🔗</span>}
+            onClick={() => openExternalUrl(record.url, () => onIncrementUrlUse(record.id))}
+            disabled={!record.url}
+            title="打开网址"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            打开
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<span>📋</span>}
+            onClick={() => copy(record.url, '网址', () => onIncrementUrlUse(record.id))}
+            disabled={!record.url}
+            title="复制网址"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            网址
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<span>🔑</span>}
+            onClick={() => copy(record.token, 'Token', () => onIncrementUrlUse(record.id))}
+            disabled={!record.token}
+            title="复制 Token"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            Token
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<span>✏️</span>}
+            onClick={() => setModal({ type: 'url', mode: 'edit', data: record })}
+            title="编辑"
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<span>🗑️</span>}
+            title="删除"
+            onClick={() => confirmDeleteUrl(record, () => onDeleteUrl(record.id))}
+            style={{ padding: '0 4px', height: '24px', fontSize: '12px' }}
+          >
+            删除
+          </Button>
+        </Space>
+      ),
+    },
   ]
 
   const hasContent = filteredAccounts.length > 0 || filteredUrls.length > 0
@@ -302,19 +443,31 @@ function ContentArea({
             {filteredUrls.length > 0 && (
               <div className="card-section">
                 <div className="section-title">网址</div>
-                <div className="card-grid">
-                  {filteredUrls.map(url => (
-                    <UrlCard
-                      key={url.id}
-                      urlItem={url}
-                      onEdit={() => setModal({ type: 'url', mode: 'edit', data: url })}
-                      onDelete={() => onDeleteUrl(url.id)}
-                      onIncrementUse={() => onIncrementUrlUse(url.id)}
-                      showStatus={showStatus}
-                      onConfirm={onConfirm}
-                    />
-                  ))}
-                </div>
+                {viewMode === 'card' ? (
+                  <div className="card-grid">
+                    {filteredUrls.map(url => (
+                      <UrlCard
+                        key={url.id}
+                        urlItem={url}
+                        onEdit={() => setModal({ type: 'url', mode: 'edit', data: url })}
+                        onDelete={() => onDeleteUrl(url.id)}
+                        onIncrementUse={() => onIncrementUrlUse(url.id)}
+                        showStatus={showStatus}
+                        onConfirm={onConfirm}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Table
+                    columns={urlColumns}
+                    dataSource={filteredUrls}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                    scroll={{ x: 1100 }}
+                    style={{ fontSize: '13px' }}
+                  />
+                )}
               </div>
             )}
           </>

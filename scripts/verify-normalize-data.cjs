@@ -62,4 +62,18 @@ const missingData = normalizeData(null)
 assert.strictEqual(missingData.theme, 'secure')
 assert.strictEqual(missingData.tabs.length, 1)
 
+// 导入旧版或手工维护的备份时，账号和网址可能没有 id；规范化必须补齐，避免后续编辑/删除用 undefined 命中多条记录。
+const missingItemIds = normalizeData({
+  schemaVersion: 2,
+  theme: 'secure',
+  tabs: [{
+    id: 'legacy-tab',
+    name: 'Legacy',
+    accounts: [{ accountName: 'No Id Account' }],
+    urls: [{ name: 'No Id Url' }],
+  }],
+})
+assert.match(missingItemIds.tabs[0].accounts[0].id, /^account-\d+-0$/)
+assert.match(missingItemIds.tabs[0].urls[0].id, /^url-\d+-0$/)
+
 console.log('normalize-data verification passed')

@@ -39,18 +39,40 @@ function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
   const saveTimerRef = useRef(null)
+  const latestDataRef = useRef(null)
+  const dataWriteProtectedRef = useRef(false)
 
   useEffect(() => {
     const load = async () => {
       let loaded
       let loadedCustomThemes = []
       if (window.electronAPI) {
-        // 数据文件和本机主题库互不依赖，并行读取可以减少启动等待时间。
-        const [dataResult, themeResult] = await Promise.all([
-          window.electronAPI.readData(),
-          window.electronAPI.readCustomThemes?.(),
-        ])
-        loaded = dataResult
+        let dataResult
+        let themeResult
+        try {
+          // 数据文件和本机主题库互不依赖，并行读取可以减少启动等待时间。
+          ;[dataResult, themeResult] = await Promise.all([
+            window.electronAPI.readData(),
+            window.electronAPI.readCustomThemes?.(),
+          ])
+        } catch (error) {
+          dataResult = { success: false, error: error.message }
+        }
+        if (dataResult?.success === false) {
+          // 数据文件读取失败时进入写保护，避免后续自动保存把空白默认数据覆盖到原始文件。
+          dataWriteProtectedRef.current = true
+          loaded = createDefaultData()
+          setDialog({
+            kind: 'info',
+            type: 'error',
+            title: '数据读取失败',
+            message: '本地数据文件无法读取，已暂停自动保存。',
+            detail: `请先导出或备份原始 safe_vault.json，再从有效备份导入。错误信息：${dataResult.error || '未知错误'}`,
+          })
+        } else {
+          dataWriteProtectedRef.current = false
+          loaded = dataResult?.data || dataResult
+        }
         if (themeResult?.success && Array.isArray(themeResult.themes)) {
           loadedCustomThemes = themeResult.themes
         }
@@ -76,23 +98,11 @@ function App() {
         loaded.theme = 'secure'
       }
       setCustomThemes(loadedCustomThemes)
+      latestDataRef.current = loaded
       setData(loaded)
       setActiveTabId(loaded.tabs[0]?.id || null)
     }
     load()
-  }, [])
-
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        // ESC 必须复用标题栏关闭按钮的同一条 Electron API，保证隐藏到托盘而不是退出应用。
-        event.preventDefault()
-        window.electronAPI?.close()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   const showStatus = useCallback((msg) => {
@@ -118,19 +128,83 @@ function App() {
     action?.()
   }, [dialog])
 
+  const writeDataNow = useCallback(async (targetData = latestDataRef.current) => {
+    if (!window.electronAPI?.writeData || !targetData) return { success: true, skipped: true }
+    if (dataWriteProtectedRef.current) {
+      // 读取失败后的保护模式禁止自动写盘，防止空白默认数据覆盖用户原始保险箱文件。
+      showStatus('数据读取失败，已暂停自动保存')
+      return { success: false, protected: true }
+    }
+
+    const result = await window.electronAPI.writeData(targetData)
+    if (result?.success === false) {
+      showInfo({
+        type: 'error',
+        title: '保存失败',
+        message: result.error || '无法写入本地数据文件。',
+      })
+    }
+    return result || { success: true }
+  }, [showInfo, showStatus])
+
+  const flushScheduledSave = useCallback(async (targetData = latestDataRef.current) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    // 导入、导出、关闭和退出都走这里，确保防抖队列里的最后一次修改先落盘。
+    return await writeDataNow(targetData)
+  }, [writeDataNow])
+
   const scheduleSave = useCallback((newData) => {
+    latestDataRef.current = newData
+    if (dataWriteProtectedRef.current) {
+      // 保护模式下仍允许用户查看界面，但不写入磁盘，避免破坏可人工恢复的原始数据文件。
+      showStatus('数据读取失败，已暂停自动保存')
+      return
+    }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null
       if (window.electronAPI) {
-        window.electronAPI.writeData(newData)
+        writeDataNow(newData)
       }
     }, 1000)
-  }, [])
+  }, [showStatus, writeDataNow])
 
   const updateData = useCallback((newData) => {
+    latestDataRef.current = newData
     setData(newData)
     scheduleSave(newData)
   }, [scheduleSave])
+
+  const handleWindowClose = useCallback(async () => {
+    // 标题栏关闭和 ESC 都会隐藏到托盘；隐藏前先写入待保存数据，避免窗口隐藏后用户误以为内容已经保存。
+    await flushScheduledSave()
+    window.electronAPI?.close()
+  }, [flushScheduledSave])
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        // ESC 必须复用标题栏关闭按钮的同一条保存+隐藏流程，保证交互入口行为一致。
+        event.preventDefault()
+        handleWindowClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleWindowClose])
+
+  useEffect(() => {
+    if (!window.electronAPI?.onBeforeAppQuit) return undefined
+    // 托盘退出由主进程发起；这里在真正退出前清空防抖保存队列，再回告主进程继续退出。
+    return window.electronAPI.onBeforeAppQuit(async () => {
+      await flushScheduledSave()
+      await window.electronAPI?.quitAfterRendererFlush?.()
+    })
+  }, [flushScheduledSave])
 
   const selectNotes = useCallback(() => {
     setActiveSection('notes')
@@ -234,13 +308,23 @@ function App() {
   }, [data, updateData])
 
   const deleteTab = useCallback((tabId) => {
+    if ((data.tabs || []).length <= 1) {
+      // 内容区依赖至少一个账号/网址标签；阻止删除最后一个标签，避免进入空标签状态后触发渲染异常。
+      showInfo({
+        type: 'info',
+        title: '无法删除',
+        message: '至少需要保留一个标签。',
+        detail: '你可以重命名当前标签，或先新建其他标签后再删除。',
+      })
+      return
+    }
     const newTabs = data.tabs.filter(t => t.id !== tabId)
     const newData = { ...data, tabs: newTabs }
     updateData(newData)
     if (activeTabId === tabId) {
       setActiveTabId(newTabs[0]?.id || null)
     }
-  }, [data, updateData, activeTabId])
+  }, [data, updateData, activeTabId, showInfo])
 
   const renameTab = useCallback((tabId, newName) => {
     updateData({
@@ -384,7 +468,18 @@ function App() {
   // --- Import / Export ---
   const handleExport = useCallback(async () => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导出')
-    const result = await window.electronAPI.exportData(data)
+    const exportData = latestDataRef.current || data
+    const flushResult = await flushScheduledSave(exportData)
+    if (flushResult?.protected) {
+      showInfo({
+        type: 'warning',
+        title: '导出已暂停',
+        message: '当前处于数据读取失败保护模式，不能导出临时默认数据。',
+        detail: '请先确认本地数据文件状态，或导入有效备份后再导出。',
+      })
+      return
+    }
+    const result = await window.electronAPI.exportData(exportData)
     if (result.success) {
       showInfo({
         type: 'success',
@@ -399,13 +494,15 @@ function App() {
         message: '导出失败: ' + result.error,
       })
     }
-  }, [data, showInfo, showStatus])
+  }, [data, flushScheduledSave, showInfo, showStatus])
 
   const handleImport = useCallback(async () => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
+    const currentData = latestDataRef.current || data
+    await flushScheduledSave(currentData)
     const result = await window.electronAPI.importData()
     if (result.success) {
-      const existing = [...data.tabs]
+      const existing = [...currentData.tabs]
       const imported = result.data.tabs || []
       let addedAccounts = 0
       let addedUrls = 0
@@ -458,7 +555,7 @@ function App() {
         if (typeof c === 'string') return c
         try { return JSON.stringify(c) } catch { return '' }
       }
-      const existingNotepads = [...(data.notepads || [])]
+      const existingNotepads = [...(currentData.notepads || [])]
       const existingNotepadKeys = new Set(
         existingNotepads.map(note => `${note.name?.trim().toLowerCase() || ''}\n${serializeContent(note.content)}`)
       )
@@ -484,13 +581,16 @@ function App() {
       const canUseImportedTheme = BUILT_IN_THEME_VALUES.has(importedTheme) ||
         (importedCustomThemeId && customThemes.some(theme => theme.id === importedCustomThemeId))
       // 数据备份不包含本机自定义主题定义；如果备份里只有 custom:<id> 引用但本机没有该主题，就保留当前可用主题。
-      updateData({
-        ...data,
-        theme: canUseImportedTheme ? importedTheme : (data.theme || 'secure'),
+      dataWriteProtectedRef.current = false
+      const mergedData = {
+        ...currentData,
+        theme: canUseImportedTheme ? importedTheme : (currentData.theme || 'secure'),
         tabs: existing,
         notepads: existingNotepads,
-        activeNotepadId: data.activeNotepadId || existingNotepads[0]?.id || null,
-      })
+        activeNotepadId: currentData.activeNotepadId || existingNotepads[0]?.id || null,
+      }
+      latestDataRef.current = mergedData
+      updateData(mergedData)
       const parts = [`新增 ${addedAccounts} 个账号，${addedUrls} 个网址，${addedNotepads} 个记事本`]
       if (skippedAccounts > 0 || skippedUrls > 0 || skippedNotepads > 0) {
         const skipParts = []
@@ -512,7 +612,7 @@ function App() {
         message: '导入失败: ' + result.error,
       })
     }
-  }, [customThemes, data, updateData, showInfo, showStatus])
+  }, [customThemes, data, flushScheduledSave, updateData, showInfo, showStatus])
 
   const themeOptions = useMemo(() => [
     ...BUILT_IN_THEME_OPTIONS,
@@ -544,6 +644,7 @@ function App() {
         themeOptions={themeOptions}
         onThemeChange={setTheme}
         onImportTheme={importTheme}
+        onWindowClose={handleWindowClose}
       />
       <div className="app-body">
         <Sidebar

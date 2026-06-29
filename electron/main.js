@@ -5,6 +5,8 @@ const themeManager = require('./themeManager')
 const windowStateManager = require('./windowStateManager')
 
 const isDev = !app.isPackaged
+// 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
+const TOPMOST_WINDOW_LEVEL = 'screen-saver'
 
 // 图标路径：开发环境用源码目录，打包后用 extraResources
 const iconPath = isDev
@@ -14,6 +16,10 @@ const iconPath = isDev
 let mainWindow
 let tray
 let forceQuit = false
+// 记录用户期望的置顶状态，避免单纯依赖系统实时状态导致按钮被轮询错误地改回未选中。
+let desiredAlwaysOnTop = false
+let pendingQuit = false
+let quitFallbackTimer = null
 let saveMainWindowSize = () => {}
 
 // 单实例检查
@@ -25,9 +31,7 @@ if (!gotTheLock) {
   app.on('second-instance', () => {
     // 当运行第二个实例时，将焦点设置到主窗口
     if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
+      showMainWindow()
     }
   })
 
@@ -44,13 +48,12 @@ if (!gotTheLock) {
   app.on('window-all-closed', () => {})
 
   // 应用退出前清理
-  app.on('before-quit', () => {
+  app.on('before-quit', (e) => {
     // 系统关机、托盘退出、应用退出前都先保存一次尺寸，兜底处理未触发 window-close 的情况。
     saveMainWindowSize()
-    forceQuit = true
-    if (tray) {
-      tray.destroy()
-      tray = null
+    if (!forceQuit) {
+      e.preventDefault()
+      requestAppQuit()
     }
   })
 
@@ -114,10 +117,130 @@ function createWindow() {
     }
   })
   mainWindow.on('resize', scheduleSaveWindowSize)
+  mainWindow.on('show', () => {
+    // 窗口从托盘或任务栏恢复时，重新应用用户主动开启的置顶状态，避免 Windows 桌面环境丢失 TOPMOST 标记。
+    reapplyAlwaysOnTop()
+  })
+  mainWindow.on('restore', () => {
+    // 任务栏点击最小化窗口后会触发 restore，这里只做前台抬升，避免再次 restore 造成事件重入。
+    raiseMainWindowToFront()
+  })
   mainWindow.on('session-end', () => {
     // Windows 注销/关机时会触发 session-end，立即保存可以覆盖用户不手动关闭进程的场景。
     saveMainWindowSize()
   })
+}
+
+function hasMainWindow() {
+  // 所有窗口控制入口先走同一个可用性判断，避免托盘回调或 IPC 在窗口已销毁时访问失效对象。
+  return mainWindow && !mainWindow.isDestroyed()
+}
+
+function destroyTray() {
+  // 托盘销毁集中到一个函数里，避免退出路径多次 destroy 导致不同 Windows 版本下出现残留图标或异常。
+  if (tray) {
+    tray.destroy()
+    tray = null
+  }
+}
+
+function finalizeAppQuit() {
+  // 渲染层确认数据 flush 后才真正退出；fallback 计时器防止渲染进程异常时应用无法退出。
+  if (quitFallbackTimer) {
+    clearTimeout(quitFallbackTimer)
+    quitFallbackTimer = null
+  }
+  forceQuit = true
+  destroyTray()
+  app.quit()
+}
+
+function requestAppQuit() {
+  if (pendingQuit) return
+  pendingQuit = true
+  saveMainWindowSize()
+
+  if (hasMainWindow() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+    // 真正退出前通知渲染层清空防抖保存队列；超时后仍退出，避免异常页面阻塞用户关闭应用。
+    mainWindow.webContents.send('app-before-quit')
+    quitFallbackTimer = setTimeout(finalizeAppQuit, 1500)
+  } else {
+    finalizeAppQuit()
+  }
+}
+
+function normalizeExternalUrl(rawUrl) {
+  const value = typeof rawUrl === 'string' ? rawUrl.trim() : ''
+  if (!value) return null
+
+  try {
+    // 用户经常只填写域名；没有协议时按 HTTPS 补齐，但仍只允许 http/https 交给系统浏览器。
+    const parsed = new URL(value.includes('://') ? value : `https://${value}`)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function reapplyAlwaysOnTop() {
+  if (!hasMainWindow() || !desiredAlwaysOnTop) return
+  // 系统仍然保留 TOPMOST 标记时不重复设置，减少状态轮询期间对原生窗口层级的打扰。
+  if (mainWindow.isAlwaysOnTop()) return
+  // Windows 上默认置顶层级在部分系统环境中不稳定，使用 Electron 支持的高层级来表达用户明确开启的置顶意图。
+  mainWindow.setAlwaysOnTop(true, TOPMOST_WINDOW_LEVEL)
+}
+
+function raiseMainWindowToFront() {
+  if (!hasMainWindow()) return
+
+  // 这里专注处理已经可恢复的窗口：显示、补置顶、抬高 Z 序并请求焦点。
+  mainWindow.show()
+  reapplyAlwaysOnTop()
+
+  // moveTop() 只调整窗口 Z 序，不依赖焦点抢占；配合 focus() 可以覆盖部分 Windows 环境中任务栏点击不前置的问题。
+  if (typeof mainWindow.moveTop === 'function') mainWindow.moveTop()
+  mainWindow.focus()
+}
+
+function showMainWindow() {
+  if (!hasMainWindow()) return
+
+  // show() 不一定会恢复最小化窗口，先 restore 再统一抬到前台，保证任务栏和托盘入口都能把窗口带回可见状态。
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  raiseMainWindowToFront()
+}
+
+function getMainWindowState() {
+  if (!hasMainWindow()) {
+    return {
+      isAlwaysOnTop: false,
+      isFullScreen: false,
+      isMaximized: false,
+    }
+  }
+
+  reapplyAlwaysOnTop()
+  return {
+    // 按钮展示用户当前选择的置顶模式，实际 TOPMOST 标记由 reapplyAlwaysOnTop 持续兜底维护。
+    isAlwaysOnTop: desiredAlwaysOnTop,
+    isFullScreen: mainWindow.isFullScreen(),
+    isMaximized: mainWindow.isMaximized(),
+  }
+}
+
+function setMainWindowAlwaysOnTop(alwaysOnTop) {
+  if (!hasMainWindow()) return getMainWindowState()
+
+  desiredAlwaysOnTop = Boolean(alwaysOnTop)
+  if (desiredAlwaysOnTop) {
+    reapplyAlwaysOnTop()
+    showMainWindow()
+  } else {
+    mainWindow.setAlwaysOnTop(false)
+  }
+
+  return getMainWindowState()
 }
 
 function createTray() {
@@ -127,26 +250,20 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: '显示窗口',
-      click: () => { mainWindow.show(); mainWindow.focus() },
+      click: showMainWindow,
     },
     { type: 'separator' },
     {
       label: '退出',
       click: () => {
-        forceQuit = true
-        // 清理托盘图标
-        if (tray) {
-          tray.destroy()
-          tray = null
-        }
-        // 退出应用
-        app.quit()
+        // 托盘退出需要先等待渲染层 flush 当前数据，不能直接 app.quit()。
+        requestAppQuit()
       },
     },
   ])
 
   tray.setContextMenu(contextMenu)
-  tray.on('double-click', () => { mainWindow.show(); mainWindow.focus() })
+  tray.on('double-click', showMainWindow)
 }
 
 
@@ -167,17 +284,11 @@ ipcMain.on('window-close', () => {
   saveMainWindowSize()
   mainWindow.hide()
 })
-ipcMain.on('window-toggle-top', (event, alwaysOnTop) => {
-  mainWindow.setAlwaysOnTop(alwaysOnTop)
-})
+ipcMain.handle('window-toggle-top', (event, alwaysOnTop) => setMainWindowAlwaysOnTop(alwaysOnTop))
 
 // Window state IPC
 ipcMain.handle('get-window-state', () => {
-  return {
-    isAlwaysOnTop: mainWindow.isAlwaysOnTop(),
-    isFullScreen: mainWindow.isFullScreen(),
-    isMaximized: mainWindow.isMaximized()
-  }
+  return getMainWindowState()
 })
 
 // File operation IPC
@@ -204,6 +315,21 @@ ipcMain.handle('show-message-box', async (event, options) => {
   return await dialog.showMessageBox(mainWindow, options)
 })
 
-ipcMain.on('open-url', (event, url) => {
-  shell.openExternal(url)
+ipcMain.handle('renderer-ready-to-quit', () => {
+  finalizeAppQuit()
+  return { success: true }
+})
+
+ipcMain.handle('open-url', async (event, url) => {
+  const externalUrl = normalizeExternalUrl(url)
+  if (!externalUrl) {
+    return { success: false, error: '仅支持 http/https 链接。' }
+  }
+
+  try {
+    await shell.openExternal(externalUrl)
+    return { success: true, url: externalUrl }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
 })

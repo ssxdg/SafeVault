@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
-function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImportTheme }) {
+function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImportTheme, onWindowClose }) {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -11,10 +11,14 @@ function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImport
   useEffect(() => {
     const updateWindowState = async () => {
       if (window.electronAPI?.getWindowState) {
-        const state = await window.electronAPI.getWindowState()
-        setIsAlwaysOnTop(state.isAlwaysOnTop)
-        setIsFullScreen(state.isFullScreen)
-        setIsMaximized(state.isMaximized)
+        try {
+          const state = await window.electronAPI.getWindowState()
+          setIsAlwaysOnTop(Boolean(state.isAlwaysOnTop))
+          setIsFullScreen(Boolean(state.isFullScreen))
+          setIsMaximized(Boolean(state.isMaximized))
+        } catch {
+          // 窗口状态同步失败时保留当前按钮状态，避免偶发 IPC 异常让置顶按钮闪回未选中。
+        }
       }
     }
 
@@ -31,12 +35,34 @@ function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImport
     // 状态会通过定期同步更新
   }
 
-  const handleClose = () => window.electronAPI?.close()
+  const handleClose = () => {
+    // 关闭前优先交给 App flush 数据；兜底保留 Electron 原始关闭入口，避免非主界面环境按钮失效。
+    if (onWindowClose) onWindowClose()
+    else window.electronAPI?.close()
+  }
 
-  const handleToggleTop = () => {
+  const handleToggleTop = async () => {
     const newVal = !isAlwaysOnTop
-    setIsAlwaysOnTop(newVal)
-    window.electronAPI?.toggleAlwaysOnTop(newVal)
+    if (!window.electronAPI?.toggleAlwaysOnTop) {
+      setIsAlwaysOnTop(newVal)
+      return
+    }
+
+    try {
+      // 置顶状态以主进程返回值为准，确保按钮选中态和真实窗口控制逻辑保持一致。
+      const state = await window.electronAPI.toggleAlwaysOnTop(newVal)
+      setIsAlwaysOnTop(Boolean(state?.isAlwaysOnTop))
+      setIsFullScreen(Boolean(state?.isFullScreen))
+      setIsMaximized(Boolean(state?.isMaximized))
+    } catch {
+      // 如果主进程暂时没有响应，主动刷新一次状态，而不是让本地推测状态长期停留。
+      try {
+        const state = await window.electronAPI.getWindowState?.()
+        if (state) setIsAlwaysOnTop(Boolean(state.isAlwaysOnTop))
+      } catch {
+        // 刷新失败时不再改动本地状态，等待下一轮定时同步恢复。
+      }
+    }
   }
 
   return (
