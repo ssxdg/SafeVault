@@ -15,6 +15,8 @@ const BUILT_IN_THEME_OPTIONS = [
 ]
 const BUILT_IN_THEME_VALUES = new Set(BUILT_IN_THEME_OPTIONS.map(option => option.value))
 const CUSTOM_THEME_PREFIX = 'custom:'
+// 侧边栏在小窗口中会明显挤占内容区，因此把自动收起阈值集中成常量，后续调整窗口适配尺寸时只需要改这里。
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 860
 
 // 业务数据里只保存 custom:<id> 引用，这个工具函数负责从引用中取出本机主题库的 id。
 const getCustomThemeId = (theme) => (
@@ -38,9 +40,31 @@ function App() {
   const [activeSection, setActiveSection] = useState('tabs')
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
+  // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => (
+    typeof window !== 'undefined' ? window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH : false
+  ))
   const saveTimerRef = useRef(null)
   const latestDataRef = useRef(null)
   const dataWriteProtectedRef = useRef(false)
+
+  useEffect(() => {
+    const syncSidebarWithWindowSize = () => {
+      // 窗口缩小到阈值内时主动收起侧边栏，把主要内容区的可用宽度优先留给表格、卡片和记事本编辑器。
+      if (window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH) {
+        setIsSidebarCollapsed(true)
+      }
+    }
+
+    syncSidebarWithWindowSize()
+    window.addEventListener('resize', syncSidebarWithWindowSize)
+    return () => window.removeEventListener('resize', syncSidebarWithWindowSize)
+  }, [])
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    // 保留手动开关入口，用户在大窗口或小窗口下都可以按自己的当前任务选择是否显示标签列表。
+    setIsSidebarCollapsed(prev => !prev)
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -651,6 +675,8 @@ function App() {
           tabs={data.tabs}
           activeTabId={activeTabId}
           activeSection={activeSection}
+          collapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebarCollapsed}
           onTabSelect={selectTab}
           onNotesSelect={selectNotes}
           onTabAdd={addTab}

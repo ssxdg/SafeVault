@@ -277,15 +277,65 @@ body {
 /* ===== Sidebar ===== */
 .sidebar {
   width: 200px;
+  min-width: 200px;
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
-  transition: width 0.2s ease-in-out;
+  border-right: 1px solid var(--sidebar-border);
+  transition: width 0.2s ease-in-out, min-width 0.2s ease-in-out;
 }
 
-.sidebar.collapsed { width: 0; }
+/* 收起后保留一条可点击的窄栏，避免侧边栏完全消失导致用户找不到展开入口。 */
+.sidebar.collapsed {
+  width: 44px;
+  min-width: 44px;
+}
+
+/* 收起控制区固定在侧栏顶部，展开和收起两种状态都保持同一位置，减少窗口变窄时的视觉跳动。 */
+.sidebar-collapse-row {
+  height: 42px;
+  padding: 7px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
+}
+
+.sidebar.collapsed .sidebar-collapse-row {
+  justify-content: center;
+  padding: 7px 6px;
+}
+
+/* 图标按钮沿用主题色变量，确保三套内置主题和自定义主题下都能保持清晰可见。 */
+.sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--sidebar-text) 26%, transparent);
+  background: color-mix(in srgb, var(--sidebar-hover) 74%, transparent);
+  color: var(--sidebar-text-active);
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--sidebar-active);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.sidebar-collapse-btn:active {
+  transform: scale(0.96);
+}
 
 .sidebar-tabs {
   flex: 1;

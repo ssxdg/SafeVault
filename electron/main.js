@@ -88,7 +88,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: savedWindowSize.width,
     height: savedWindowSize.height,
-    minWidth: 700,
+    // 侧边栏支持收起后，小窗口仍需要继续缩窄使用，因此最小宽度从原来的 700 减半到 350。
+    minWidth: 350,
     minHeight: 500,
     frame: false,
     icon: iconPath,

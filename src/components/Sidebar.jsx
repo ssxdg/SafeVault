@@ -1,6 +1,19 @@
 import React, { useState, useRef } from 'react'
 
-function Sidebar({ tabs, activeTabId, activeSection, onTabSelect, onNotesSelect, onTabAdd, onTabDelete, onTabRename, onTabReorder, onConfirm }) {
+function Sidebar({
+  tabs,
+  activeTabId,
+  activeSection,
+  collapsed,
+  onToggleCollapse,
+  onTabSelect,
+  onNotesSelect,
+  onTabAdd,
+  onTabDelete,
+  onTabRename,
+  onTabReorder,
+  onConfirm,
+}) {
   const [editingId, setEditingId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const [showNewInput, setShowNewInput] = useState(false)
@@ -84,73 +97,94 @@ function Sidebar({ tabs, activeTabId, activeSection, onTabSelect, onNotesSelect,
     setDragOverIndex(null)
   }
 
+  // 收起按钮文案集中计算，确保按钮的悬浮提示、无障碍标签和图标状态始终表达同一个动作。
+  const collapseButtonTitle = collapsed ? '展开侧边栏' : '收起侧边栏'
+
   return (
-    <div className="sidebar">
-      <div className="sidebar-tabs">
-        <div
-          className={`sidebar-tab sidebar-notes-btn${activeSection === 'notes' ? ' active' : ''}`}
-          onClick={onNotesSelect}
+    <div className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+      <div className="sidebar-collapse-row">
+        <button
+          type="button"
+          className="sidebar-collapse-btn"
+          onClick={onToggleCollapse}
+          title={collapseButtonTitle}
+          aria-label={collapseButtonTitle}
+          aria-expanded={!collapsed}
         >
-          <span className="tab-name">记事本</span>
-        </div>
-        <div className="sidebar-divider" />
-        {tabs.map((tab, index) => (
-          <div
-            key={tab.id}
-            className={`sidebar-tab${activeSection === 'tabs' && activeTabId === tab.id ? ' active' : ''}${dragOverIndex === index ? ' drag-over' : ''}`}
-            onClick={() => { if (editingId !== tab.id) onTabSelect(tab.id) }}
-            onDoubleClick={(e) => handleDoubleClick(e, tab)}
-            draggable
-            onDragStart={(e) => handleDragStart(e, index)}
-            onDragOver={(e) => handleDragOver(e, index)}
-            onDrop={(e) => handleDrop(e, index)}
-            onDragEnd={handleDragEnd}
-          >
-            {editingId === tab.id ? (
-              <input
-                ref={renameInputRef}
-                className="tab-rename-input"
-                value={editingName}
-                onChange={(e) => setEditingName(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={handleRenameKeyDown}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <>
-                <span className="tab-name">{tab.name}</span>
-                <button
-                  className="tab-delete-btn"
-                  onClick={(e) => handleDelete(e, tab.id)}
-                  title="删除标签"
-                >
-                  ×
-                </button>
-              </>
-            )}
-          </div>
-        ))}
+          {collapsed ? '☰' : '‹'}
+        </button>
       </div>
 
-      <div className="sidebar-footer">
-        {showNewInput ? (
-          <div className="new-tab-input-wrap">
-            <input
-              ref={newTabInputRef}
-              className="new-tab-input"
-              value={newTabName}
-              onChange={(e) => setNewTabName(e.target.value)}
-              onBlur={commitNewTab}
-              onKeyDown={handleNewTabKeyDown}
-              placeholder="输入标签名称"
-            />
+      {/* 侧栏收起时只保留窄栏按钮，避免隐藏内容继续占用点击区域或被键盘焦点误选中。 */}
+      {!collapsed && (
+        <>
+          <div className="sidebar-tabs">
+            <div
+              className={`sidebar-tab sidebar-notes-btn${activeSection === 'notes' ? ' active' : ''}`}
+              onClick={onNotesSelect}
+            >
+              <span className="tab-name">记事本</span>
+            </div>
+            <div className="sidebar-divider" />
+            {tabs.map((tab, index) => (
+              <div
+                key={tab.id}
+                className={`sidebar-tab${activeSection === 'tabs' && activeTabId === tab.id ? ' active' : ''}${dragOverIndex === index ? ' drag-over' : ''}`}
+                onClick={() => { if (editingId !== tab.id) onTabSelect(tab.id) }}
+                onDoubleClick={(e) => handleDoubleClick(e, tab)}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+              >
+                {editingId === tab.id ? (
+                  <input
+                    ref={renameInputRef}
+                    className="tab-rename-input"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={handleRenameKeyDown}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <>
+                    <span className="tab-name">{tab.name}</span>
+                    <button
+                      className="tab-delete-btn"
+                      onClick={(e) => handleDelete(e, tab.id)}
+                      title="删除标签"
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
           </div>
-        ) : (
-          <button className="add-tab-btn" onClick={handleAddClick}>
-            + 添加标签
-          </button>
-        )}
-      </div>
+
+          <div className="sidebar-footer">
+            {showNewInput ? (
+              <div className="new-tab-input-wrap">
+                <input
+                  ref={newTabInputRef}
+                  className="new-tab-input"
+                  value={newTabName}
+                  onChange={(e) => setNewTabName(e.target.value)}
+                  onBlur={commitNewTab}
+                  onKeyDown={handleNewTabKeyDown}
+                  placeholder="输入标签名称"
+                />
+              </div>
+            ) : (
+              <button className="add-tab-btn" onClick={handleAddClick}>
+                + 添加标签
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
