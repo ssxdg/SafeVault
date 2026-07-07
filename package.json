@@ -1,6 +1,6 @@
 {
   "name": "safe-vault",
-  "version": "3.3.2",
+  "version": "3.3.3",
   "description": "密码保险箱 - 个人账号密码管理器",
   "author": "SafeVault Team",
   "main": "electron/main.js",

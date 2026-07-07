@@ -6,14 +6,16 @@ import Modal from './Modal'
 
 function ContentArea({
   tab,
+  viewMode = 'card',
+  onViewModeChange,
   onAddAccount, onUpdateAccount, onDeleteAccount,
   onAddUrl, onUpdateUrl, onDeleteUrl,
   onIncrementAccountUse, onIncrementUrlUse,
   showStatus,
   onConfirm,
 }) {
+  // 视图模式由 App 持有，因为切换到记事本会卸载本组件；这里只负责渲染和回传用户选择。
   const [searchQuery, setSearchQuery] = useState('')
-  const [viewMode, setViewMode] = useState('card') // 'card' | 'list'
   const [modal, setModal] = useState(null)
   // modal shape: { type: 'account'|'url', mode: 'add'|'edit', data: {} }
   // 排序快照必须在任何条件返回前创建，保证标签被删除到空状态时 React hook 顺序仍保持稳定。
@@ -373,14 +375,14 @@ function ContentArea({
         <div className="view-toggle">
           <button
             className={`view-btn ${viewMode === 'card' ? 'active' : ''}`}
-            onClick={() => setViewMode('card')}
+            onClick={() => onViewModeChange?.('card')}
             title="卡片视图"
           >
             📇
           </button>
           <button
             className={`view-btn ${viewMode === 'list' ? 'active' : ''}`}
-            onClick={() => setViewMode('list')}
+            onClick={() => onViewModeChange?.('list')}
             title="列表视图"
           >
             📋

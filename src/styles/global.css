@@ -246,8 +246,13 @@ body {
 }
 
 .theme-select option {
-  color: #111827;
-  background: #FFFFFF;
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.theme-select option:checked {
+  color: var(--text);
+  background: var(--active-bg);
 }
 
 .titlebar-btn {
@@ -266,6 +271,13 @@ body {
   font-family: "Segoe UI", sans-serif;
 }
 .titlebar-btn:hover { background: rgba(255,255,255,0.1); color: var(--titlebar-text); }
+.titlebar-btn.theme-delete-btn {
+  color: color-mix(in srgb, var(--danger) 76%, var(--titlebar-text));
+}
+.titlebar-btn.theme-delete-btn:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
 .titlebar-btn.active {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
@@ -568,6 +580,37 @@ body {
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+
+/* 列表视图的横向滚动区域单独接入主题变量，让滚动条在深色、浅色和自定义主题下都不会突兀。 */
+.app .ant-table-content,
+.app .ant-table-body {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 70%, var(--surface-raised)) color-mix(in srgb, var(--surface-muted) 78%, transparent);
+}
+
+.app .ant-table-content::-webkit-scrollbar,
+.app .ant-table-body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app .ant-table-content::-webkit-scrollbar-track,
+.app .ant-table-body::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+  border-radius: 999px;
+}
+
+.app .ant-table-content::-webkit-scrollbar-thumb,
+.app .ant-table-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  border: 2px solid color-mix(in srgb, var(--surface-muted) 88%, transparent);
+  border-radius: 999px;
+}
+
+.app .ant-table-content::-webkit-scrollbar-thumb:hover,
+.app .ant-table-body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
 }
 
 .app .ant-table {

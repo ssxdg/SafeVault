@@ -311,6 +311,9 @@ ipcMain.handle('read-custom-themes', async () => {
 ipcMain.handle('import-theme-file', async () => {
   return await themeManager.importThemeFile(mainWindow)
 })
+ipcMain.handle('delete-custom-theme', async (event, themeId) => {
+  return await themeManager.deleteCustomTheme(themeId)
+})
 
 ipcMain.handle('show-message-box', async (event, options) => {
   return await dialog.showMessageBox(mainWindow, options)

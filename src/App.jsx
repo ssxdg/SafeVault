@@ -38,6 +38,8 @@ function App() {
   const [customThemes, setCustomThemes] = useState([])
   const [activeTabId, setActiveTabId] = useState(null)
   const [activeSection, setActiveSection] = useState('tabs')
+  // 账号区会在切换到记事本时卸载；视图模式放在 App 层才能让用户切回来时保留列表/卡片选择。
+  const [contentViewMode, setContentViewMode] = useState('card')
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
   // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
@@ -400,6 +402,49 @@ function App() {
     }
   }, [data, showInfo, showStatus, updateData])
 
+  const deleteActiveCustomTheme = useCallback(() => {
+    const customThemeId = getCustomThemeId(data?.theme)
+    const targetTheme = customThemes.find(theme => theme.id === customThemeId)
+    if (!targetTheme) {
+      showStatus('请选择导入主题后再删除')
+      return
+    }
+    if (!window.electronAPI?.deleteCustomTheme) {
+      showStatus('仅 Electron 环境支持删除主题')
+      return
+    }
+
+    showConfirm({
+      title: '删除导入主题',
+      message: `确定要删除「${targetTheme.name}」吗？`,
+      detail: '删除后该主题会从本机主题库移除；如果当前正在使用它，界面会自动切回默认主题。',
+      confirmText: '删除',
+      type: 'warning',
+    }, async () => {
+      const result = await window.electronAPI.deleteCustomTheme(customThemeId)
+      if (result?.success) {
+        setCustomThemes(prev => prev.filter(theme => theme.id !== customThemeId))
+        const currentData = latestDataRef.current || data
+        if (currentData?.theme === `${CUSTOM_THEME_PREFIX}${customThemeId}`) {
+          // 业务数据只保存主题引用；删除当前引用后切回内置默认主题，避免下次启动再指向不存在的主题。
+          updateData({ ...currentData, theme: 'secure' })
+        }
+        showInfo({
+          type: 'success',
+          title: '删除导入主题',
+          message: '主题已删除。',
+          detail: targetTheme.name,
+        })
+      } else {
+        showInfo({
+          type: 'error',
+          title: '删除主题失败',
+          message: result?.error || '无法删除该主题。',
+        })
+      }
+    })
+  }, [customThemes, data, showConfirm, showInfo, showStatus, updateData])
+
   // --- Account operations ---
   const addAccount = useCallback((tabId, account) => {
     const now = new Date().toISOString()
@@ -668,6 +713,8 @@ function App() {
         themeOptions={themeOptions}
         onThemeChange={setTheme}
         onImportTheme={importTheme}
+        onDeleteTheme={deleteActiveCustomTheme}
+        canDeleteTheme={Boolean(activeCustomTheme)}
         onWindowClose={handleWindowClose}
       />
       <div className="app-body">
@@ -701,6 +748,8 @@ function App() {
         ) : (
           <ContentArea
             tab={activeTab}
+            viewMode={contentViewMode}
+            onViewModeChange={setContentViewMode}
             onAddAccount={(acc) => addAccount(activeTabId, acc)}
             onUpdateAccount={(id, acc) => updateAccount(activeTabId, id, acc)}
             onDeleteAccount={(id) => deleteAccount(activeTabId, id)}

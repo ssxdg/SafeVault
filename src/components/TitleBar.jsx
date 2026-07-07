@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react'
 import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
-function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImportTheme, onWindowClose }) {
+function TitleBar({
+  theme = 'secure',
+  themeOptions = [],
+  onThemeChange,
+  onImportTheme,
+  onDeleteTheme,
+  canDeleteTheme = false,
+  onWindowClose,
+}) {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
@@ -91,6 +99,16 @@ function TitleBar({ theme = 'secure', themeOptions = [], onThemeChange, onImport
         >
           🎨
         </button>
+        {/* 只允许删除当前选中的导入主题，避免用户误删内置主题或不知道删除目标。 */}
+        {canDeleteTheme && (
+          <button
+            className="titlebar-btn theme-delete-btn"
+            onClick={onDeleteTheme}
+            title="删除当前导入主题"
+          >
+            🗑️
+          </button>
+        )}
         <button
           className={`titlebar-btn${isAlwaysOnTop ? ' active' : ''}`}
           onClick={handleToggleTop}

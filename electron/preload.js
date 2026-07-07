@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importData: () => ipcRenderer.invoke('import-data'),
   readCustomThemes: () => ipcRenderer.invoke('read-custom-themes'),
   importThemeFile: () => ipcRenderer.invoke('import-theme-file'),
+  // 删除主题必须走主进程统一校验并写入用户数据目录，避免渲染层直接接触本地文件路径。
+  deleteCustomTheme: (themeId) => ipcRenderer.invoke('delete-custom-theme', themeId),
 
   // Open external URL
   // 打开外部链接需要等待主进程完成协议校验，失败时调用方可以给出用户提示。

@@ -174,9 +174,34 @@ async function importThemeFile(mainWindow) {
   }
 }
 
+async function deleteCustomTheme(themeId) {
+  const id = typeof themeId === 'string' ? themeId.trim() : ''
+  if (!THEME_ID_PATTERN.test(id) || RESERVED_THEME_IDS.has(id)) {
+    return { success: false, error: '无效的自定义主题 id。' }
+  }
+
+  try {
+    const store = await readThemeStore()
+    const targetTheme = store.themes.find(theme => theme.id === id)
+    if (!targetTheme) {
+      return { success: false, error: '要删除的主题不存在。' }
+    }
+
+    // 删除只影响本机主题库，不触碰用户业务数据；渲染层负责把当前引用切回可用内置主题。
+    await writeThemeStore({
+      schemaVersion: THEME_STORE_SCHEMA_VERSION,
+      themes: store.themes.filter(theme => theme.id !== id),
+    })
+    return { success: true, theme: targetTheme }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
 module.exports = {
   REQUIRED_THEME_VARIABLES,
   validateCustomTheme,
   readCustomThemes,
   importThemeFile,
+  deleteCustomTheme,
 }
