@@ -2,7 +2,8 @@ const fs = require('fs')
 const path = require('path')
 
 const DEFAULT_WINDOW_SIZE = { width: 1300, height: 800 }
-const MIN_WINDOW_SIZE = { width: 700, height: 500 }
+// 持久化校验与 BrowserWindow 共用同一组最小尺寸，避免合法的小窗口被错误替换为默认尺寸。
+const MIN_WINDOW_SIZE = { width: 350, height: 500 }
 const WINDOW_STATE_FILE = 'safe_vault_window_state.json'
 
 function getWindowStatePath() {

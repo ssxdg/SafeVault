@@ -4,6 +4,7 @@ const {
   REQUIRED_THEME_VARIABLES,
   validateCustomTheme,
 } = require('../electron/themeManager')
+const { normalizeWindowSize } = require('../electron/windowStateManager')
 
 const appSource = fs.readFileSync('src/App.jsx', 'utf-8')
 const titleBarSource = fs.readFileSync('src/components/TitleBar.jsx', 'utf-8')
@@ -33,6 +34,13 @@ assert(mainSource.includes('session-end'), 'Windows shutdown path should save cu
 assert(mainSource.includes('getWindowOptions'), 'main process should restore saved window size')
 assert(preloadSource.includes('readCustomThemes'), 'preload should expose readCustomThemes')
 assert(preloadSource.includes('importThemeFile'), 'preload should expose importThemeFile')
+
+// 主窗口允许缩窄到 350 像素，因此持久化校验必须接受这个范围内的正常尺寸；否则退出时会把用户尺寸错误替换为默认值。
+assert.deepStrictEqual(
+  normalizeWindowSize({ width: 640, height: 600 }),
+  { width: 640, height: 600 },
+  'window sizes allowed by BrowserWindow should be persisted without falling back to defaults',
+)
 
 // 读数据失败不能静默回退成空数据，否则后续保存会覆盖损坏的原始文件。
 assert(fileManagerSource.includes('success: false') && fileManagerSource.includes('ENOENT'), 'read-data should distinguish missing file from read/parse errors')
