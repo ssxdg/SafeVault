@@ -5,6 +5,9 @@ import ContentArea from './components/ContentArea'
 import NotesPad from './components/NotesPad'
 import BottomBar from './components/BottomBar'
 import AppDialog from './components/AppDialog'
+import VaultUnlock from './components/VaultUnlock'
+import BrowserExtensionSettings from './components/BrowserExtensionSettings'
+import { useVaultSession } from './hooks/useVaultSession'
 
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2)
 // 内置主题仍然保留为固定选项，自定义主题会在运行时追加到这个列表后面。
@@ -26,7 +29,7 @@ const getCustomThemeId = (theme) => (
 )
 
 const createDefaultData = () => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   theme: 'secure',
   tabs: [{ id: generateId(), name: '个人账户', accounts: [], urls: [] }],
   notepads: [{ id: generateId(), name: '未命名', content: '', createdAt: '', updatedAt: '' }],
@@ -34,6 +37,16 @@ const createDefaultData = () => ({
 })
 
 function App() {
+  const {
+    status: vaultStatus,
+    data: vaultData,
+    inspect: inspectVault,
+    unlock: unlockVault,
+    create: createVault,
+    migrate: migrateVault,
+    lock: lockVault,
+    setIdleTimeoutMinutes,
+  } = useVaultSession()
   const [data, setData] = useState(null)
   const [customThemes, setCustomThemes] = useState([])
   const [activeTabId, setActiveTabId] = useState(null)
@@ -42,6 +55,7 @@ function App() {
   const [contentViewMode, setContentViewMode] = useState('card')
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
+  const [isBrowserSettingsOpen, setIsBrowserSettingsOpen] = useState(false)
   // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH : false
@@ -69,67 +83,34 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const load = async () => {
-      let loaded
-      let loadedCustomThemes = []
-      if (window.electronAPI) {
-        let dataResult
-        let themeResult
-        try {
-          // 数据文件和本机主题库互不依赖，并行读取可以减少启动等待时间。
-          ;[dataResult, themeResult] = await Promise.all([
-            window.electronAPI.readData(),
-            window.electronAPI.readCustomThemes?.(),
-          ])
-        } catch (error) {
-          dataResult = { success: false, error: error.message }
-        }
-        if (dataResult?.success === false) {
-          // 数据文件读取失败时进入写保护，避免后续自动保存把空白默认数据覆盖到原始文件。
-          dataWriteProtectedRef.current = true
-          loaded = createDefaultData()
-          setDialog({
-            kind: 'info',
-            type: 'error',
-            title: '数据读取失败',
-            message: '本地数据文件无法读取，已暂停自动保存。',
-            detail: `请先导出或备份原始 safe_vault.json，再从有效备份导入。错误信息：${dataResult.error || '未知错误'}`,
-          })
-        } else {
-          dataWriteProtectedRef.current = false
-          loaded = dataResult?.data || dataResult
-        }
-        if (themeResult?.success && Array.isArray(themeResult.themes)) {
-          loadedCustomThemes = themeResult.themes
-        }
-      }
-      if (!loaded || !Array.isArray(loaded.tabs) || loaded.tabs.length === 0) {
-        loaded = createDefaultData()
-      }
-      if (!Array.isArray(loaded.notepads) || loaded.notepads.length === 0) {
-        loaded.notepads = [{
-          id: generateId(),
-          name: '未命名',
-          content: typeof loaded.notes === 'string' ? loaded.notes : '',
-          createdAt: '',
-          updatedAt: '',
-        }]
-      }
-      if (!loaded.activeNotepadId || !loaded.notepads.some(n => n.id === loaded.activeNotepadId)) {
-        loaded.activeNotepadId = loaded.notepads[0].id
-      }
-      const customThemeId = getCustomThemeId(loaded.theme)
-      const hasCustomTheme = customThemeId && loadedCustomThemes.some(theme => theme.id === customThemeId)
-      if (!BUILT_IN_THEME_VALUES.has(loaded.theme) && !hasCustomTheme) {
-        loaded.theme = 'secure'
-      }
-      setCustomThemes(loadedCustomThemes)
-      latestDataRef.current = loaded
-      setData(loaded)
-      setActiveTabId(loaded.tabs[0]?.id || null)
+    const loadThemes = async () => {
+      const result = await window.electronAPI?.readCustomThemes?.()
+      if (result?.success && Array.isArray(result.themes)) setCustomThemes(result.themes)
     }
-    load()
+    loadThemes()
   }, [])
+
+  useEffect(() => {
+    if (vaultStatus.state !== 'unlocked' || !vaultData) {
+      latestDataRef.current = null
+      setData(null)
+      setActiveTabId(null)
+      return
+    }
+
+    const loaded = { ...vaultData }
+    if (!Array.isArray(loaded.tabs) || loaded.tabs.length === 0) loaded.tabs = createDefaultData().tabs
+    if (!Array.isArray(loaded.notepads) || loaded.notepads.length === 0) {
+      loaded.notepads = createDefaultData().notepads
+    }
+    if (!loaded.activeNotepadId || !loaded.notepads.some(note => note.id === loaded.activeNotepadId)) {
+      loaded.activeNotepadId = loaded.notepads[0].id
+    }
+    dataWriteProtectedRef.current = false
+    latestDataRef.current = loaded
+    setData(loaded)
+    setActiveTabId(loaded.tabs[0]?.id || null)
+  }, [vaultData, vaultStatus.state])
 
   const showStatus = useCallback((msg) => {
     setStatusMsg(msg)
@@ -144,25 +125,37 @@ function App() {
     setDialog({ kind: 'confirm', type: 'warning', confirmText: '确定', cancelText: '取消', ...options, onConfirm })
   }, [])
 
+  const showPasswordPrompt = useCallback((options, onConfirm) => {
+    setDialog({
+      kind: 'prompt',
+      type: 'warning',
+      inputType: 'password',
+      confirmText: '继续',
+      cancelText: '取消',
+      ...options,
+      onConfirm,
+    })
+  }, [])
+
   const closeDialog = useCallback(() => {
     setDialog(null)
   }, [])
 
-  const confirmDialog = useCallback(() => {
+  const confirmDialog = useCallback((value) => {
     const action = dialog?.onConfirm
     setDialog(null)
-    action?.()
+    action?.(value)
   }, [dialog])
 
   const writeDataNow = useCallback(async (targetData = latestDataRef.current) => {
-    if (!window.electronAPI?.writeData || !targetData) return { success: true, skipped: true }
+    if (!window.electronAPI?.writeVaultData || !targetData) return { success: true, skipped: true }
     if (dataWriteProtectedRef.current) {
       // 读取失败后的保护模式禁止自动写盘，防止空白默认数据覆盖用户原始保险箱文件。
       showStatus('数据读取失败，已暂停自动保存')
       return { success: false, protected: true }
     }
 
-    const result = await window.electronAPI.writeData(targetData)
+    const result = await window.electronAPI.writeVaultData(targetData)
     if (result?.success === false) {
       showInfo({
         type: 'error',
@@ -181,6 +174,11 @@ function App() {
     // 导入、导出、关闭和退出都走这里，确保防抖队列里的最后一次修改先落盘。
     return await writeDataNow(targetData)
   }, [writeDataNow])
+
+  const handleVaultLock = useCallback(async () => {
+    await flushScheduledSave()
+    await lockVault('manual')
+  }, [flushScheduledSave, lockVault])
 
   const scheduleSave = useCallback((newData) => {
     latestDataRef.current = newData
@@ -203,6 +201,25 @@ function App() {
     setData(newData)
     scheduleSave(newData)
   }, [scheduleSave])
+
+  useEffect(() => {
+    if (!window.electronAPI?.onVaultCredentialUpdated) return undefined
+    return window.electronAPI.onVaultCredentialUpdated(update => {
+      if (!update?.accountId || typeof update.newPassword !== 'string' || !latestDataRef.current) return
+      const updatedData = {
+        ...latestDataRef.current,
+        tabs: latestDataRef.current.tabs.map(tab => ({
+          ...tab,
+          accounts: (tab.accounts || []).map(account => account.id === update.accountId
+            ? { ...account, password: update.newPassword, updatedAt: update.updatedAt }
+            : account),
+        })),
+      }
+      setData(updatedData)
+      scheduleSave(updatedData)
+      showStatus('浏览器确认的新密码已保存')
+    })
+  }, [scheduleSave, showStatus])
 
   const handleWindowClose = useCallback(async () => {
     // 标题栏关闭和 ESC 都会隐藏到托盘；隐藏前先写入待保存数据，避免窗口隐藏后用户误以为内容已经保存。
@@ -537,8 +554,7 @@ function App() {
   // --- Import / Export ---
   const handleExport = useCallback(async () => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导出')
-    const exportData = latestDataRef.current || data
-    const flushResult = await flushScheduledSave(exportData)
+    const flushResult = await flushScheduledSave(latestDataRef.current || data)
     if (flushResult?.protected) {
       showInfo({
         type: 'warning',
@@ -548,13 +564,13 @@ function App() {
       })
       return
     }
-    const result = await window.electronAPI.exportData(exportData)
+    const result = await window.electronAPI.exportEncryptedVault()
     if (result.success) {
       showInfo({
         type: 'success',
         title: '密码保险箱',
         message: '导出成功！',
-        detail: '数据已成功导出为 JSON 备份文件。',
+        detail: '数据已成功导出为加密 JSON 备份文件。',
       })
     } else if (!result.cancelled) {
       showInfo({
@@ -565,11 +581,11 @@ function App() {
     }
   }, [data, flushScheduledSave, showInfo, showStatus])
 
-  const handleImport = useCallback(async () => {
+  const handleImport = useCallback(async (password) => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
     const currentData = latestDataRef.current || data
     await flushScheduledSave(currentData)
-    const result = await window.electronAPI.importData()
+    const result = await window.electronAPI.importEncryptedVault(password)
     if (result.success) {
       const existing = [...currentData.tabs]
       const imported = result.data.tabs || []
@@ -683,6 +699,32 @@ function App() {
     }
   }, [customThemes, data, flushScheduledSave, updateData, showInfo, showStatus])
 
+  const requestImport = useCallback(() => {
+    showPasswordPrompt({
+      title: '导入加密备份',
+      message: '请输入该备份文件的主密码。',
+      detail: '密码仅用于在本机验证并解密所选备份。',
+    }, handleImport)
+  }, [handleImport, showPasswordPrompt])
+
+  const handlePlaintextExport = useCallback(() => {
+    showPasswordPrompt({
+      title: '危险操作：导出明文',
+      message: '明文文件会直接包含账号、密码和 Token。请输入当前主密码继续。',
+      detail: '请只保存到可信位置，并在使用后安全删除该文件。',
+      confirmText: '确认明文导出',
+    }, async password => {
+      const flushResult = await flushScheduledSave(latestDataRef.current || data)
+      if (flushResult?.success === false) return
+      const result = await window.electronAPI.exportPlaintextVault(password)
+      if (result?.success) {
+        showInfo({ type: 'warning', title: '明文导出完成', message: '未加密 JSON 已保存。', detail: '请妥善保管并尽快删除不再需要的副本。' })
+      } else if (!result?.cancelled) {
+        showInfo({ type: 'error', title: '明文导出失败', message: result?.error || '无法导出。' })
+      }
+    })
+  }, [data, flushScheduledSave, showInfo, showPasswordPrompt])
+
   const themeOptions = useMemo(() => [
     ...BUILT_IN_THEME_OPTIONS,
     ...customThemes.map(theme => ({
@@ -690,6 +732,18 @@ function App() {
       label: theme.name,
     })),
   ], [customThemes])
+
+  if (vaultStatus.state !== 'unlocked') {
+    return (
+      <VaultUnlock
+        status={vaultStatus}
+        onUnlock={unlockVault}
+        onCreate={createVault}
+        onMigrate={migrateVault}
+        onRetry={inspectVault}
+      />
+    )
+  }
 
   if (!data) {
     return (
@@ -715,6 +769,9 @@ function App() {
         onImportTheme={importTheme}
         onDeleteTheme={deleteActiveCustomTheme}
         canDeleteTheme={Boolean(activeCustomTheme)}
+        onLock={handleVaultLock}
+        idleTimeoutMinutes={vaultStatus.idleTimeoutMinutes || 15}
+        onIdleTimeoutChange={setIdleTimeoutMinutes}
         onWindowClose={handleWindowClose}
       />
       <div className="app-body">
@@ -763,8 +820,17 @@ function App() {
           />
         )}
       </div>
-      <BottomBar statusMsg={statusMsg} onExport={handleExport} onImport={handleImport} />
+      <BottomBar
+        statusMsg={statusMsg}
+        onExport={handleExport}
+        onImport={requestImport}
+        onPlaintextExport={handlePlaintextExport}
+        onBrowserSettings={() => setIsBrowserSettingsOpen(true)}
+      />
       <AppDialog dialog={dialog} onClose={closeDialog} onConfirm={confirmDialog} />
+      {isBrowserSettingsOpen && (
+        <BrowserExtensionSettings onClose={() => setIsBrowserSettingsOpen(false)} />
+      )}
     </div>
   )
 }

@@ -10,10 +10,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getWindowState: () => ipcRenderer.invoke('get-window-state'),
 
   // File operations
-  readData: () => ipcRenderer.invoke('read-data'),
-  writeData: (data) => ipcRenderer.invoke('write-data', data),
-  exportData: (data) => ipcRenderer.invoke('export-data', data),
-  importData: () => ipcRenderer.invoke('import-data'),
+  inspectVault: () => ipcRenderer.invoke('vault-inspect'),
+  unlockVault: (password) => ipcRenderer.invoke('vault-unlock', password),
+  createVault: (password) => ipcRenderer.invoke('vault-create', password),
+  migrateVault: (password) => ipcRenderer.invoke('vault-migrate', password),
+  lockVault: (reason = 'manual') => ipcRenderer.invoke('vault-lock', reason),
+  touchVault: () => ipcRenderer.invoke('vault-touch'),
+  setVaultIdleTimeout: (minutes) => ipcRenderer.invoke('vault-set-idle-timeout', minutes),
+  onVaultStatusChanged: (callback) => {
+    const listener = (event, status) => callback(status)
+    ipcRenderer.on('vault-status-changed', listener)
+    return () => ipcRenderer.removeListener('vault-status-changed', listener)
+  },
+  onVaultCredentialUpdated: (callback) => {
+    const listener = (event, update) => callback(update)
+    ipcRenderer.on('vault-credential-updated', listener)
+    return () => ipcRenderer.removeListener('vault-credential-updated', listener)
+  },
+  writeVaultData: (data) => ipcRenderer.invoke('vault-write-data', data),
+  copySecret: (value, ttlMs = 30_000) => ipcRenderer.invoke('vault-copy-secret', value, ttlMs),
+  normalizeWebsiteTarget: (value) => ipcRenderer.invoke('login-target-normalize-website', value),
+  selectExecutableTarget: () => ipcRenderer.invoke('login-target-select-executable'),
+  captureForegroundTarget: () => ipcRenderer.invoke('login-target-capture-foreground'),
+  exportEncryptedVault: () => ipcRenderer.invoke('vault-export-encrypted'),
+  importEncryptedVault: (password) => ipcRenderer.invoke('vault-import-encrypted', password),
+  exportPlaintextVault: (password) => ipcRenderer.invoke('vault-export-plaintext', password),
+  getNativeHostStatus: () => ipcRenderer.invoke('native-host-status'),
+  registerNativeHost: (extensionIds) => ipcRenderer.invoke('native-host-register', extensionIds),
+  unregisterNativeHost: () => ipcRenderer.invoke('native-host-unregister'),
   readCustomThemes: () => ipcRenderer.invoke('read-custom-themes'),
   importThemeFile: () => ipcRenderer.invoke('import-theme-file'),
   // 删除主题必须走主进程统一校验并写入用户数据目录，避免渲染层直接接触本地文件路径。

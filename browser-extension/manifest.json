@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "SafeVault 本地填充",
+  "version": "1.0.0",
+  "description": "由用户主动触发，从本机 SafeVault 填充当前网站的登录表单。",
+  "permissions": ["activeTab", "nativeMessaging", "tabs"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "SafeVault",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["shared/fieldDetector.js", "content-script.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

@@ -4,15 +4,18 @@ import copyIcon from '../images/复制.png'
 function AccountCard({ account, onEdit, onDelete, onIncrementUse, showStatus, onConfirm }) {
   const [showPassword, setShowPassword] = useState(false)
 
-  const copy = (text, label) => {
+  const copy = async (text, label) => {
     if (!text) return
-    // 剪贴板写入可能被系统权限拒绝，失败时必须提示，避免用户误判敏感信息已复制。
-    navigator.clipboard.writeText(text)
-      .then(() => {
-        showStatus(`已复制${label}到剪贴板`)
-        onIncrementUse?.()
-      })
-      .catch(() => showStatus(`复制${label}失败`))
+    try {
+      const result = window.electronAPI?.copySecret
+        ? await window.electronAPI.copySecret(text)
+        : await navigator.clipboard.writeText(text).then(() => ({ success: true }))
+      if (result?.success === false) throw new Error(result.error)
+      showStatus(`已复制${label}，30 秒后自动清理`)
+      onIncrementUse?.()
+    } catch {
+      showStatus(`复制${label}失败`)
+    }
   }
 
   const openLoginUrl = async (e) => {

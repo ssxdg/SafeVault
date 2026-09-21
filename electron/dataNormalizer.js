@@ -1,3 +1,9 @@
+const {
+  normalizeWebsiteOrigin,
+  normalizeExecutablePath,
+  isSafeWindowTitlePattern,
+} = require('./credentialMatcher')
+
 const EMPTY_DELTA = { ops: [{ insert: '\n' }] }
 const VALID_THEMES = new Set(['secure', 'compact', 'warm'])
 const CUSTOM_THEME_PATTERN = /^custom:[a-z][a-z0-9-]{2,31}$/
@@ -52,8 +58,89 @@ function normalizeCollectionItems(items, idPrefix) {
   }))
 }
 
+function normalizeLoginTarget(target, fallbackId) {
+  if (!target || typeof target !== 'object') return null
+  const id = typeof target.id === 'string' && target.id.trim() ? target.id.trim() : fallbackId
+
+  if (target.type === 'website') {
+    const origin = normalizeWebsiteOrigin(target.origin)
+    if (!origin) return null
+    return {
+      id,
+      type: 'website',
+      origin,
+      enabled: target.enabled !== false,
+    }
+  }
+
+  if (target.type === 'windowsApp') {
+    const executablePath = normalizeExecutablePath(target.executablePath)
+    if (!executablePath) return null
+    const normalized = {
+      id,
+      type: 'windowsApp',
+      executablePath,
+      enabled: target.enabled !== false,
+      fillStrategy: ['uia', 'clipboard', 'keystroke'].includes(target.fillStrategy)
+        ? target.fillStrategy
+        : 'uia',
+    }
+    if (typeof target.windowTitlePattern === 'string' && target.windowTitlePattern.trim()) {
+      const pattern = target.windowTitlePattern.trim()
+      if (!isSafeWindowTitlePattern(pattern)) return null
+      normalized.windowTitlePattern = pattern
+    }
+    for (const selectorName of ['usernameSelector', 'passwordSelector']) {
+      const selector = target[selectorName]
+      if (!selector || typeof selector !== 'object') continue
+      const automationId = typeof selector.automationId === 'string' ? selector.automationId.trim() : ''
+      const name = typeof selector.name === 'string' ? selector.name.trim() : ''
+      if ((!automationId && !name) || automationId.length > 256 || name.length > 256) return null
+      normalized[selectorName] = {
+        ...(automationId ? { automationId } : {}),
+        ...(name ? { name } : {}),
+      }
+    }
+    return normalized
+  }
+
+  return null
+}
+
+function normalizeLoginTargets(account, accountId, migrateLegacyLoginUrl) {
+  const targets = (Array.isArray(account?.loginTargets) ? account.loginTargets : [])
+    .map((target, index) => normalizeLoginTarget(target, `${accountId}-target-${index}`))
+    .filter(Boolean)
+
+  if (migrateLegacyLoginUrl) {
+    const legacyOrigin = normalizeWebsiteOrigin(account?.loginUrl)
+    const hasOrigin = targets.some(target => target.type === 'website' && target.origin === legacyOrigin)
+    if (legacyOrigin && !hasOrigin) {
+      targets.push({
+        id: `${accountId}-website-legacy`,
+        type: 'website',
+        origin: legacyOrigin,
+        enabled: true,
+      })
+    }
+  }
+
+  return targets
+}
+
+function normalizeAccounts(items, migrateLegacyLoginUrl) {
+  return stableSortByUseCount(items).map((item, index) => {
+    const accountId = item?.id || `account-${Date.now()}-${index}`
+    return {
+      ...item,
+      id: accountId,
+      loginTargets: normalizeLoginTargets(item, accountId, migrateLegacyLoginUrl),
+    }
+  })
+}
+
 const defaultData = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   theme: 'secure',
   tabs: [
     { id: 'default-tab', name: 'Default', accounts: [], urls: [] },
@@ -64,12 +151,12 @@ const defaultData = {
   activeNotepadId: 'default-note',
 }
 
-function normalizeTabs(tabs) {
+function normalizeTabs(tabs, migrateLegacyLoginUrl) {
   const sourceTabs = Array.isArray(tabs) && tabs.length > 0 ? tabs : defaultData.tabs
   return sourceTabs.map((tab, index) => ({
     id: tab.id || `tab-${Date.now()}-${index}`,
     name: tab.name || `Tab ${index + 1}`,
-    accounts: normalizeCollectionItems(tab.accounts, 'account'),
+    accounts: normalizeAccounts(tab.accounts, migrateLegacyLoginUrl),
     urls: normalizeCollectionItems(tab.urls, 'url'),
   }))
 }
@@ -97,14 +184,16 @@ function normalizeNotepads(data) {
 
 function normalizeData(data) {
   const source = data && typeof data === 'object' ? data : {}
-  const tabs = normalizeTabs(source.tabs)
+  const sourceSchemaVersion = Number(source.schemaVersion)
+  const migrateLegacyLoginUrl = !Number.isFinite(sourceSchemaVersion) || sourceSchemaVersion < 3
+  const tabs = normalizeTabs(source.tabs, migrateLegacyLoginUrl)
   const notepads = normalizeNotepads(source)
   const activeNotepadId = notepads.some(note => note.id === source.activeNotepadId)
     ? source.activeNotepadId
     : notepads[0].id
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     theme: normalizeTheme(source.theme),
     tabs,
     notepads,

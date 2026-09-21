@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
+import LoginTargetEditor from './LoginTargetEditor'
 
-const ACCOUNT_DEFAULTS = { accountName: '', username: '', password: '', email: '', loginUrl: '', note: '' }
+const ACCOUNT_DEFAULTS = { accountName: '', username: '', password: '', email: '', loginUrl: '', note: '', loginTargets: [] }
 const URL_DEFAULTS = { name: '', url: '', token: '', note: '' }
 
 function Modal({ modal, onSave, onClose }) {
@@ -96,6 +97,10 @@ function Modal({ modal, onSave, onClose }) {
                   rows={3}
                 />
               </div>
+              <LoginTargetEditor
+                value={form.loginTargets}
+                onChange={loginTargets => set('loginTargets', loginTargets)}
+              />
             </>
           ) : (
             <>

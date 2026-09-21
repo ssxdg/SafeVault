@@ -17,3 +17,7 @@ aigc-data.xlsx
 .DS_Store
 
 .idea
+
+native-bridge/**/bin/
+native-bridge/**/obj/
+native-bridge/publish/

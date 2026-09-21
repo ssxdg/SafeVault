@@ -84,15 +84,18 @@ function ContentArea({
     setModal(null)
   }
 
-  const copy = (text, label, onCopied) => {
+  const copy = async (text, label, onCopied) => {
     if (!text) return
-    // 剪贴板 API 可能因系统权限失败，失败时给出状态提示，避免用户误以为已经复制成功。
-    navigator.clipboard.writeText(text)
-      .then(() => {
-        showStatus(`已复制${label}到剪贴板`)
-        onCopied?.()
-      })
-      .catch(() => showStatus(`复制${label}失败`))
+    try {
+      const result = window.electronAPI?.copySecret
+        ? await window.electronAPI.copySecret(text)
+        : await navigator.clipboard.writeText(text).then(() => ({ success: true }))
+      if (result?.success === false) throw new Error(result.error)
+      showStatus(`已复制${label}，30 秒后自动清理`)
+      onCopied?.()
+    } catch {
+      showStatus(`复制${label}失败`)
+    }
   }
 
   const openExternalUrl = async (url, onOpened) => {

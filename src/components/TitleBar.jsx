@@ -9,6 +9,9 @@ function TitleBar({
   onImportTheme,
   onDeleteTheme,
   canDeleteTheme = false,
+  onLock,
+  idleTimeoutMinutes = 15,
+  onIdleTimeoutChange,
   onWindowClose,
 }) {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
@@ -80,6 +83,19 @@ function TitleBar({
         <span className="titlebar-title">密码保险箱 v{__APP_VERSION__}</span>
       </div>
       <div className="titlebar-controls">
+        <select
+          className="vault-timeout-select"
+          value={idleTimeoutMinutes}
+          onChange={(event) => onIdleTimeoutChange?.(Number(event.target.value))}
+          title="无操作自动锁定时间"
+        >
+          {[5, 15, 30, 60].map(minutes => (
+            <option key={minutes} value={minutes}>{minutes} 分钟锁定</option>
+          ))}
+        </select>
+        <button className="titlebar-btn" onClick={onLock} title="立即锁定密码库">
+          🔒
+        </button>
         <select
           className="theme-select"
           value={theme}

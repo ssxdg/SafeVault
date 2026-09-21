@@ -1370,3 +1370,260 @@ body {
 .notepad-editor-wrap .ql-toolbar.ql-snow .ql-picker.ql-header .ql-picker-item[data-value='3']::before {
   content: '标题 3';
 }
+
+.app-dialog-input {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: var(--input-bg);
+}
+
+/* 密码库锁定页独立于业务数据渲染，锁定后页面中不保留账号和记事本组件。 */
+.vault-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: #E2E8F0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.18), transparent 34%),
+    radial-gradient(circle at 80% 80%, rgba(99, 102, 241, 0.16), transparent 30%),
+    #0F172A;
+  position: relative;
+}
+
+.vault-window-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 4px;
+}
+
+.vault-window-actions button {
+  width: 38px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: #CBD5E1;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vault-window-actions button:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.vault-unlock-card {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 34px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  background: rgba(30, 41, 59, 0.94);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.38);
+}
+
+.vault-unlock-icon {
+  width: 58px;
+  height: 58px;
+  align-self: center;
+  border-radius: 14px;
+}
+
+.vault-unlock-card h1 {
+  margin: 4px 0 0;
+  color: #F8FAFC;
+  font-size: 22px;
+  text-align: center;
+}
+
+.vault-unlock-card p {
+  margin: 0;
+  color: #94A3B8;
+  line-height: 1.6;
+}
+
+.vault-unlock-card label {
+  margin-top: 4px;
+  color: #CBD5E1;
+  font-size: 13px;
+}
+
+.vault-unlock-card input {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  outline: none;
+  color: #F8FAFC;
+  background: #0F172A;
+}
+
+.vault-unlock-card input:focus {
+  border-color: #38BDF8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+}
+
+.vault-unlock-card .vault-warning {
+  color: #FBBF24;
+}
+
+.vault-unlock-card .vault-error {
+  color: #FCA5A5;
+}
+
+.vault-retry {
+  font-size: 12px;
+}
+
+.vault-submit {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.vault-loading {
+  color: #CBD5E1;
+  font-size: 15px;
+}
+
+.vault-timeout-select {
+  height: 30px;
+  margin-right: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--titlebar-text);
+  background: var(--titlebar-bg);
+  font-size: 12px;
+}
+
+.login-target-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+}
+
+.login-target-heading {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.login-target-add-row,
+.login-target-summary,
+.login-target-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.login-target-add-row input,
+.login-target-options input {
+  min-width: 0;
+  flex: 1;
+}
+
+.login-target-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.login-target-summary > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-target-summary label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.login-target-options select {
+  max-width: 150px;
+}
+
+.login-target-options {
+  flex-wrap: wrap;
+}
+
+.login-target-field-summary {
+  width: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.login-target-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.login-target-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.browser-extension-settings {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.extension-settings-help {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.extension-settings-help code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: var(--surface-muted);
+}
+
+.extension-same-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.extension-registration-state {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+
+.extension-registration-state.registered {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.extension-settings-message {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.extension-settings-actions .btn-danger {
+  margin-right: auto;
+}

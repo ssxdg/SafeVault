@@ -1,8 +1,14 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog, powerMonitor, clipboard, globalShortcut } = require('electron')
+const { spawn } = require('child_process')
 const path = require('path')
 const fileManager = require('./fileManager')
 const themeManager = require('./themeManager')
 const windowStateManager = require('./windowStateManager')
+const { VaultSession } = require('./vaultSession')
+const { createClipboardManager } = require('./clipboardManager')
+const { normalizeWebsiteOrigin, normalizeExecutablePath, findCredentialsForApp, findMatchingAppTarget } = require('./credentialMatcher')
+const { createBridgeServer, getCurrentUserSid, writeBridgeConfig } = require('./bridgeServer')
+const { createNativeHostManager } = require('./nativeHostManager')
 
 const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
@@ -21,6 +27,160 @@ let desiredAlwaysOnTop = false
 let pendingQuit = false
 let quitFallbackTimer = null
 let saveMainWindowSize = () => {}
+let vaultSession
+let clipboardManager
+let bridgeServer
+let nativeHostManager
+
+function getBridgeExecutablePath() {
+  return isDev
+    ? path.join(__dirname, '../native-bridge/publish/SafeVault.Bridge.exe')
+    : path.join(process.resourcesPath, 'native-bridge/SafeVault.Bridge.exe')
+}
+
+function runBridgeCommand(command, payload, timeoutMs = 5_000) {
+  return new Promise(resolve => {
+    const child = spawn(getBridgeExecutablePath(), [command], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+    })
+    let output = ''
+    let settled = false
+    const finish = result => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(result)
+    }
+    const timeout = setTimeout(() => {
+      child.kill()
+      finish({ success: false, code: 'automation-timeout' })
+    }, timeoutMs)
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', chunk => {
+      output += chunk
+      if (Buffer.byteLength(output, 'utf8') > 1024 * 1024) {
+        child.kill()
+        finish({ success: false, code: 'automation-response-too-large' })
+      }
+    })
+    child.on('error', () => finish({ success: false, code: 'bridge-unavailable' }))
+    child.on('close', () => {
+      if (settled) return
+      try {
+        finish(JSON.parse(output))
+      } catch {
+        finish({ success: false, code: 'invalid-bridge-response' })
+      }
+    })
+    child.stdin.end(payload === undefined ? '' : JSON.stringify(payload))
+  })
+}
+
+function findAccountById(data, accountId) {
+  return (Array.isArray(data?.tabs) ? data.tabs : [])
+    .flatMap(tab => Array.isArray(tab.accounts) ? tab.accounts : [])
+    .find(account => account?.id === accountId) || null
+}
+
+function isSafeVaultExecutable(executablePath) {
+  const targetPath = normalizeExecutablePath(executablePath)
+  const currentPath = normalizeExecutablePath(process.execPath)
+  return Boolean(targetPath && currentPath && targetPath.toLowerCase() === currentPath.toLowerCase())
+}
+
+async function handleDesktopAutofill() {
+  if (vaultSession?.getStatus().state !== 'unlocked') {
+    showMainWindow()
+    await dialog.showMessageBox(mainWindow, { type: 'warning', message: '请先解锁 SafeVault，再使用桌面自动填充。' })
+    return
+  }
+  const inspected = await runBridgeCommand('desktop-inspect')
+  if (!inspected.appIdentity) {
+    await dialog.showMessageBox(mainWindow, { type: 'warning', message: `无法识别或安全访问当前程序（${inspected.code || 'unknown'}）。` })
+    return
+  }
+  if (isSafeVaultExecutable(inspected.appIdentity.executablePath)) {
+    await dialog.showMessageBox(mainWindow, { type: 'warning', message: '不能向 SafeVault 自身执行桌面填充。' })
+    return
+  }
+  const data = await vaultSession.requireData()
+  const summaries = findCredentialsForApp(data, inspected.appIdentity)
+  if (summaries.length === 0) {
+    await dialog.showMessageBox(mainWindow, { type: 'info', message: '当前前台程序没有匹配的已启用账号规则。' })
+    return
+  }
+  const buttons = [...summaries.map(summary => summary.accountName || summary.username || '未命名账号'), '取消']
+  const choice = await dialog.showMessageBox({
+    type: 'question',
+    title: 'SafeVault 桌面填充',
+    message: '请选择要填充到当前程序的账号。',
+    buttons,
+    cancelId: buttons.length - 1,
+    defaultId: 0,
+    noLink: true,
+  })
+  if (choice.response >= summaries.length) return
+  const account = findAccountById(data, summaries[choice.response].id)
+  const target = findMatchingAppTarget(account, inspected.appIdentity)
+  if (!account || !target) return
+  if (target.fillStrategy === 'clipboard') {
+    const clipboardChoice = await dialog.showMessageBox({
+      type: 'question',
+      title: 'SafeVault 剪贴板兜底',
+      message: '请选择要复制的字段；仅当前剪贴板仍由 SafeVault 持有时，内容会在 30 秒后清理。',
+      buttons: ['复制账号', '复制密码', '取消'],
+      cancelId: 2,
+      defaultId: 0,
+      noLink: true,
+    })
+    if (clipboardChoice.response === 0 && account.username) clipboardManager.copySecret(account.username)
+    if (clipboardChoice.response === 1 && account.password) clipboardManager.copySecret(account.password)
+    return
+  }
+  if (target.fillStrategy === 'keystroke') {
+    if (!account.username || !account.password) {
+      await dialog.showMessageBox({ type: 'warning', message: '模拟粘贴要求账号和密码均非空。' })
+      return
+    }
+    clipboardManager.copySecret(account.username)
+    const usernameResult = await runBridgeCommand('desktop-paste', {
+      expectedExecutablePath: target.executablePath,
+      windowTitlePattern: target.windowTitlePattern || null,
+      pressTabAfter: true,
+    })
+    if (!usernameResult.success) {
+      clipboardManager.clearOwnedSecret()
+      await dialog.showMessageBox({ type: 'warning', message: `未执行模拟粘贴（${usernameResult.code || 'unknown'}）。` })
+      return
+    }
+    clipboardManager.copySecret(account.password)
+    const passwordResult = await runBridgeCommand('desktop-paste', {
+      expectedExecutablePath: target.executablePath,
+      windowTitlePattern: target.windowTitlePattern || null,
+      pressTabAfter: false,
+    })
+    await new Promise(resolve => setTimeout(resolve, 150))
+    clipboardManager.clearOwnedSecret()
+    await dialog.showMessageBox({
+      type: passwordResult.success ? 'info' : 'warning',
+      message: passwordResult.success ? '账号密码已模拟粘贴，提交前请核对。' : `密码未粘贴（${passwordResult.code || 'unknown'}）。`,
+    })
+    return
+  }
+  const result = await runBridgeCommand('desktop-fill', {
+    expectedExecutablePath: target.executablePath,
+    windowTitlePattern: target.windowTitlePattern || null,
+    username: typeof account.username === 'string' ? account.username : '',
+    password: typeof account.password === 'string' ? account.password : '',
+    usernameSelector: target.usernameSelector || null,
+    passwordSelector: target.passwordSelector || null,
+  })
+  await dialog.showMessageBox(mainWindow, {
+    type: result.success ? 'info' : 'warning',
+    message: result.success ? '账号密码已填入，提交前请核对。' : `未执行填充（${result.code || 'unknown'}）。`,
+  })
+}
 
 // 单实例检查
 const gotTheLock = app.requestSingleInstanceLock()
@@ -36,9 +196,65 @@ if (!gotTheLock) {
   })
 
   // 只有获得单实例锁的应用才启动
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    nativeHostManager = createNativeHostManager({
+      bridgePath: getBridgeExecutablePath(),
+      manifestDirectory: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'SafeVault', 'NativeMessagingHosts'),
+    })
+    clipboardManager = createClipboardManager({
+      readText: () => clipboard.readText(),
+      writeText: value => clipboard.writeText(value),
+    })
+    vaultSession = new VaultSession({
+      unlock: password => fileManager.unlockVault(password),
+      lock: () => fileManager.lockVault(),
+      onStateChange: status => {
+        if (status.state === 'locked') clipboardManager.clearOwnedSecret()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('vault-status-changed', status)
+        }
+      },
+    })
+    powerMonitor.on('lock-screen', () => {
+      void vaultSession.lock('system')
+    })
+    try {
+      bridgeServer = createBridgeServer({
+        userSid: getCurrentUserSid(),
+        isUnlocked: () => vaultSession.getStatus().state === 'unlocked',
+        getVaultData: () => vaultSession.requireData(),
+        updateCredential: async ({ accountId, newPassword }) => {
+          const currentData = await vaultSession.requireData()
+          const updatedData = structuredClone(currentData)
+          const account = updatedData.tabs
+            ?.flatMap(tab => Array.isArray(tab.accounts) ? tab.accounts : [])
+            .find(item => item?.id === accountId)
+          if (!account) return { success: false }
+          account.password = newPassword
+          account.updatedAt = new Date().toISOString()
+          const result = await fileManager.writeEncryptedData(updatedData)
+          if (!result.success) return result
+          vaultSession.replaceData(result.data)
+          vaultSession.touch()
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('vault-credential-updated', { accountId, newPassword, updatedAt: account.updatedAt })
+          }
+          return { success: true }
+        },
+      })
+      await bridgeServer.start()
+      writeBridgeConfig(bridgeServer)
+    } catch (error) {
+      console.error(`SafeVault Bridge 服务启动失败：${error.message}`)
+    }
     createWindow()
     createTray()
+    if (!globalShortcut.register('CommandOrControl+Shift+L', () => void handleDesktopAutofill())) {
+      void dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        message: '快捷键 Ctrl+Shift+L 已被其他程序占用，桌面自动填充快捷键未启用。',
+      })
+    }
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -62,6 +278,7 @@ if (!gotTheLock) {
     if (!forceQuit) {
       e.preventDefault()
     } else {
+      globalShortcut.unregisterAll()
       if (tray) {
         tray.destroy()
         tray = null
@@ -152,6 +369,8 @@ function finalizeAppQuit() {
     quitFallbackTimer = null
   }
   forceQuit = true
+  void vaultSession?.lock('quit')
+  void bridgeServer?.stop()
   destroyTray()
   app.quit()
 }
@@ -293,17 +512,116 @@ ipcMain.handle('get-window-state', () => {
 })
 
 // File operation IPC
-ipcMain.handle('read-data', async () => {
-  return await fileManager.readData()
+ipcMain.handle('vault-inspect', async () => {
+  const result = await fileManager.inspectVault()
+  // 渲染层只需要状态来选择创建、迁移或解锁界面，不返回密文、文件路径等内部信息。
+  if (result.state === 'locked') return { state: 'locked' }
+  return result
 })
-ipcMain.handle('write-data', async (event, data) => {
-  return await fileManager.writeData(data)
+ipcMain.handle('vault-unlock', async (event, password) => {
+  return await vaultSession.unlock(password)
 })
-ipcMain.handle('export-data', async (event, data) => {
-  return await fileManager.exportData(mainWindow, data)
+ipcMain.handle('vault-create', async (event, password) => {
+  const result = await fileManager.createVault(password)
+  if (result.success) vaultSession.adoptData(result.data)
+  return result
 })
-ipcMain.handle('import-data', async () => {
-  return await fileManager.importData(mainWindow)
+ipcMain.handle('vault-migrate', async (event, password) => {
+  const result = await fileManager.migratePlaintextVault(password)
+  if (result.success) vaultSession.adoptData(result.data)
+  return result
+})
+ipcMain.handle('vault-lock', async (event, reason = 'manual') => {
+  return await vaultSession.lock(reason)
+})
+ipcMain.handle('vault-touch', () => {
+  vaultSession.touch()
+  return vaultSession.getStatus()
+})
+ipcMain.handle('vault-set-idle-timeout', (event, minutes) => {
+  try {
+    vaultSession.setIdleTimeoutMinutes(minutes)
+    return { success: true, status: vaultSession.getStatus() }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+ipcMain.handle('vault-copy-secret', (event, value, ttlMs = 30_000) => {
+  if (vaultSession.getStatus().state !== 'unlocked') {
+    return { success: false, error: '密码库尚未解锁，不能复制敏感信息。' }
+  }
+  try {
+    return clipboardManager.copySecret(value, ttlMs)
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+ipcMain.handle('login-target-normalize-website', (event, value) => {
+  const origin = normalizeWebsiteOrigin(value)
+  return origin
+    ? { success: true, origin }
+    : { success: false, error: '请输入完整的 HTTP 或 HTTPS 网站地址。' }
+})
+ipcMain.handle('login-target-select-executable', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: '选择登录程序',
+    filters: [{ name: 'Windows 程序', extensions: ['exe'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || !filePaths?.[0]) return { success: false, cancelled: true }
+  const executablePath = normalizeExecutablePath(filePaths[0])
+  return executablePath
+    ? { success: true, executablePath }
+    : { success: false, error: '只能选择本机绝对路径下的 .exe 程序。' }
+})
+ipcMain.handle('login-target-capture-foreground', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { success: false, code: 'window-unavailable' }
+  mainWindow.hide()
+  await new Promise(resolve => setTimeout(resolve, 1500))
+  const result = await runBridgeCommand('desktop-inspect')
+  showMainWindow()
+  if (result?.appIdentity && isSafeVaultExecutable(result.appIdentity.executablePath)) {
+    return { success: false, code: 'unsafe-target' }
+  }
+  return result
+})
+
+ipcMain.handle('vault-write-data', async (event, data) => {
+  if (vaultSession.getStatus().state !== 'unlocked') {
+    return { success: false, error: '密码库尚未解锁，不能写入数据。' }
+  }
+  const result = await fileManager.writeEncryptedData(data)
+  if (result.success) vaultSession.replaceData(result.data)
+  return result
+})
+ipcMain.handle('vault-export-encrypted', async () => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await fileManager.exportEncryptedVault(mainWindow)
+})
+ipcMain.handle('vault-import-encrypted', async (event, password) => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await fileManager.importEncryptedVault(mainWindow, password)
+})
+ipcMain.handle('vault-export-plaintext', async (event, password) => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await fileManager.exportPlaintextVault(mainWindow, password)
+})
+ipcMain.handle('native-host-status', async () => {
+  return await nativeHostManager.getStatus()
+})
+ipcMain.handle('native-host-register', async (event, extensionIds) => {
+  try {
+    return await nativeHostManager.register(extensionIds || {})
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+ipcMain.handle('native-host-unregister', async () => {
+  try {
+    return await nativeHostManager.unregister()
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
 })
 ipcMain.handle('read-custom-themes', async () => {
   return await themeManager.readCustomThemes()

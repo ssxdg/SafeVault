@@ -29,7 +29,7 @@ const input = {
 
 const normalized = normalizeData(input)
 
-assert.strictEqual(normalized.schemaVersion, 2)
+assert.strictEqual(normalized.schemaVersion, 3)
 assert.strictEqual(normalized.theme, 'compact')
 assert.deepStrictEqual(
   normalized.tabs[0].accounts.map(item => item.id),
@@ -75,5 +75,77 @@ const missingItemIds = normalizeData({
 })
 assert.match(missingItemIds.tabs[0].accounts[0].id, /^account-\d+-0$/)
 assert.match(missingItemIds.tabs[0].urls[0].id, /^url-\d+-0$/)
+
+// schema v2 的合法登录网址会迁移为显式网站目标；无效网址保留原字段，但不得获得填充权限。
+const legacyAccounts = normalizeData({
+  schemaVersion: 2,
+  tabs: [{
+    id: 'legacy-targets',
+    name: 'Legacy Targets',
+    accounts: [
+      { id: 'legacy-valid', accountName: 'Valid', loginUrl: 'https://login.example.com/sign-in' },
+      { id: 'legacy-invalid', accountName: 'Invalid', loginUrl: 'example.com/login' },
+      { id: 'legacy-unsafe', accountName: 'Unsafe', loginUrl: 'javascript:alert(1)' },
+    ],
+    urls: [],
+  }],
+})
+assert.strictEqual(legacyAccounts.schemaVersion, 3)
+assert.deepStrictEqual(
+  legacyAccounts.tabs[0].accounts[0].loginTargets.map(target => ({
+    type: target.type,
+    origin: target.origin,
+    enabled: target.enabled,
+  })),
+  [{ type: 'website', origin: 'https://login.example.com', enabled: true }],
+)
+assert.strictEqual(legacyAccounts.tabs[0].accounts[1].loginUrl, 'example.com/login')
+assert.deepStrictEqual(legacyAccounts.tabs[0].accounts[1].loginTargets, [])
+assert.strictEqual(legacyAccounts.tabs[0].accounts[2].loginUrl, 'javascript:alert(1)')
+assert.deepStrictEqual(legacyAccounts.tabs[0].accounts[2].loginTargets, [])
+
+// schema v3 只接受显式目标，不根据普通 loginUrl 隐式扩大自动填充权限。
+const currentAccounts = normalizeData({
+  schemaVersion: 3,
+  tabs: [{
+    id: 'current-targets',
+    name: 'Current Targets',
+    accounts: [{
+      id: 'current-account',
+      accountName: 'Current',
+      loginUrl: 'https://implicit.example.com/login',
+      loginTargets: [
+        { id: 'website-target', type: 'website', origin: 'https://explicit.example.com/path', enabled: true },
+        { id: 'disabled-target', type: 'website', origin: 'https://disabled.example.com', enabled: false },
+        { id: 'invalid-target', type: 'website', origin: 'chrome://settings/', enabled: true },
+        {
+          id: 'desktop-target',
+          type: 'windowsApp',
+          executablePath: 'C:/Program Files/Example/example.exe',
+          windowTitlePattern: 'Example Login',
+          enabled: true,
+          fillStrategy: 'uia',
+          usernameSelector: { automationId: 'username' },
+          passwordSelector: { name: 'Password' },
+        },
+      ],
+    }],
+    urls: [],
+  }],
+})
+assert.deepStrictEqual(currentAccounts.tabs[0].accounts[0].loginTargets, [
+  { id: 'website-target', type: 'website', origin: 'https://explicit.example.com', enabled: true },
+  { id: 'disabled-target', type: 'website', origin: 'https://disabled.example.com', enabled: false },
+  {
+    id: 'desktop-target',
+    type: 'windowsApp',
+    executablePath: 'C:\\Program Files\\Example\\example.exe',
+    windowTitlePattern: 'Example Login',
+    enabled: true,
+    fillStrategy: 'uia',
+    usernameSelector: { automationId: 'username' },
+    passwordSelector: { name: 'Password' },
+  },
+])
 
 console.log('normalize-data verification passed')
