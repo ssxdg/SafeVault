@@ -205,6 +205,11 @@ if (!gotTheLock) {
       bridgePath: getBridgeExecutablePath(),
       manifestDirectory: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'SafeVault', 'NativeMessagingHosts'),
     })
+    try {
+      await nativeHostManager.repairRegistration()
+    } catch (error) {
+      console.error(`SafeVault Native Host 注册修复失败：${error.message}`)
+    }
     clipboardManager = createClipboardManager({
       readText: () => clipboard.readText(),
       writeText: value => clipboard.writeText(value),
@@ -247,8 +252,11 @@ if (!gotTheLock) {
           return { success: true }
         },
       })
+      writeBridgeConfig({
+        ...bridgeServer,
+        appPath: isDev ? null : process.execPath,
+      })
       await bridgeServer.start()
-      writeBridgeConfig(bridgeServer)
     } catch (error) {
       console.error(`SafeVault Bridge 服务启动失败：${error.message}`)
     }

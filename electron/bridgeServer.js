@@ -189,13 +189,14 @@ function protectTokenForCurrentUser(token) {
   }).trim()
 }
 
-function writeBridgeConfig({ pipeName, sessionToken, configPath }) {
+function writeBridgeConfig({ pipeName, sessionToken, appPath, configPath, protectToken = protectTokenForCurrentUser }) {
   const targetPath = configPath || path.join(process.env.LOCALAPPDATA || os.homedir(), 'SafeVault', 'bridge.json')
   const temporaryPath = `${targetPath}.tmp`
   fs.mkdirSync(path.dirname(targetPath), { recursive: true })
   fs.writeFileSync(temporaryPath, JSON.stringify({
     pipeName,
-    protectedToken: protectTokenForCurrentUser(sessionToken),
+    protectedToken: protectToken(sessionToken),
+    ...(typeof appPath === 'string' && appPath ? { appPath } : {}),
   }, null, 2), { encoding: 'utf8', mode: 0o600 })
   fs.renameSync(temporaryPath, targetPath)
   return targetPath

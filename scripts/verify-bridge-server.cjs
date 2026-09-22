@@ -129,11 +129,19 @@ async function main() {
   const configDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'safevault-bridge-config-'))
   try {
     const configPath = path.join(configDirectory, 'bridge.json')
-    writeBridgeConfig({ pipeName: first.pipeName, sessionToken: first.sessionToken, configPath })
+    const appPath = 'C:\\Program Files\\SafeVault\\SafeVault.exe'
+    writeBridgeConfig({
+      pipeName: first.pipeName,
+      sessionToken: first.sessionToken,
+      appPath,
+      configPath,
+      protectToken: token => `protected:${token.length}`,
+    })
     const configRaw = await fs.readFile(configPath, 'utf8')
     const config = JSON.parse(configRaw)
     assert.strictEqual(config.pipeName, first.pipeName)
-    assert.strictEqual(typeof config.protectedToken, 'string')
+    assert.strictEqual(config.appPath, appPath)
+    assert.strictEqual(config.protectedToken, `protected:${first.sessionToken.length}`)
     assert.strictEqual(configRaw.includes(first.sessionToken), false)
   } finally {
     await fs.rm(configDirectory, { recursive: true, force: true })

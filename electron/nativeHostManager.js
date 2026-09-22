@@ -73,22 +73,31 @@ function createNativeHostManager({
     return await getStatus()
   }
 
-  async function readRegisteredId(manifestPath) {
+  async function readManifestExtensionId(manifestPath, requireCurrentBridgePath = true) {
     try {
       const manifest = JSON.parse(await fsApi.readFile(manifestPath, 'utf8'))
       const origin = Array.isArray(manifest.allowed_origins) ? manifest.allowed_origins[0] : ''
       const match = /^chrome-extension:\/\/([a-p]{32})\/$/.exec(origin)
-      if (manifest.name !== HOST_NAME || manifest.path !== bridgePath || !match) return ''
+      if (manifest.name !== HOST_NAME || (requireCurrentBridgePath && manifest.path !== bridgePath) || !match) return ''
       return match[1]
     } catch {
       return ''
     }
   }
 
+  async function repairRegistration() {
+    const [chromeExtensionId, edgeExtensionId] = await Promise.all([
+      readManifestExtensionId(manifestPaths.chrome, false),
+      readManifestExtensionId(manifestPaths.edge, false),
+    ])
+    if (!chromeExtensionId || !edgeExtensionId) return { success: true, repaired: false }
+    return { ...await register({ chromeExtensionId, edgeExtensionId }), repaired: true }
+  }
+
   async function getStatus() {
     const [chromeExtensionId, edgeExtensionId, bridgeExists] = await Promise.all([
-      readRegisteredId(manifestPaths.chrome),
-      readRegisteredId(manifestPaths.edge),
+      readManifestExtensionId(manifestPaths.chrome),
+      readManifestExtensionId(manifestPaths.edge),
       fsApi.access(bridgePath).then(() => true, () => false),
     ])
     return {
@@ -119,7 +128,7 @@ function createNativeHostManager({
     return { success: true }
   }
 
-  return { validateExtensionId, register, unregister, getStatus }
+  return { validateExtensionId, register, repairRegistration, unregister, getStatus }
 }
 
 module.exports = { createNativeHostManager, HOST_NAME, EXTENSION_ID_PATTERN }

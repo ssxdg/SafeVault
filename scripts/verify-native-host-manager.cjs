@@ -24,6 +24,27 @@ async function main() {
   })
 
   try {
+    await fs.mkdir(manifestDirectory, { recursive: true })
+    await fs.writeFile(path.join(manifestDirectory, 'chrome.json'), JSON.stringify({
+      name: 'com.safevault.bridge',
+      path: 'D:\\removed-install\\SafeVault.Bridge.exe',
+      type: 'stdio',
+      allowed_origins: [`chrome-extension://${CHROME_ID}/`],
+    }))
+    await fs.writeFile(path.join(manifestDirectory, 'edge.json'), JSON.stringify({
+      name: 'com.safevault.bridge',
+      path: 'D:\\removed-install\\SafeVault.Bridge.exe',
+      type: 'stdio',
+      allowed_origins: [`chrome-extension://${EDGE_ID}/`],
+    }))
+
+    const repaired = await manager.repairRegistration()
+    assert.strictEqual(repaired.repaired, true)
+    assert.strictEqual(commands.filter(command => command.args[0] === 'ADD').length, 2)
+    assert.strictEqual(JSON.parse(await fs.readFile(path.join(manifestDirectory, 'chrome.json'), 'utf8')).path, bridgePath)
+    assert.strictEqual(JSON.parse(await fs.readFile(path.join(manifestDirectory, 'edge.json'), 'utf8')).path, bridgePath)
+    commands.length = 0
+
     assert.throws(
       () => manager.validateExtensionId('invalid-id'),
       /32 位 a-p/,
