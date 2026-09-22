@@ -2,12 +2,25 @@ using SafeVault.Bridge.Protocol;
 using SafeVault.Bridge.Transport;
 using SafeVault.Bridge.Automation;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 
 var jsonOptions = new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     PropertyNameCaseInsensitive = true,
 };
+
+if (args.Length == 1 && args[0] == "protect-token")
+{
+    var token = await Console.In.ReadToEndAsync();
+    if (string.IsNullOrWhiteSpace(token) || token.Length > 4096)
+        throw new InvalidDataException("Invalid bridge token.");
+    var protectedBytes = ProtectedData.Protect(
+        Encoding.UTF8.GetBytes(token), null, DataProtectionScope.CurrentUser);
+    Console.Write(Convert.ToBase64String(protectedBytes));
+    return;
+}
 
 if (args.Length == 1 && args[0] == "desktop-inspect")
 {

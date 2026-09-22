@@ -50,7 +50,7 @@ function sendNative(request) {
   return new Promise(resolve => {
     chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, request, response => {
       if (chrome.runtime.lastError) {
-        resolve({ requestId: request.requestId, ok: false, code: 'APP_UNAVAILABLE' })
+        resolve({ requestId: request.requestId, ok: false, code: 'NATIVE_HOST_ERROR' })
         return
       }
       resolve(response || { requestId: request.requestId, ok: false, code: 'EMPTY_RESPONSE' })

@@ -174,22 +174,21 @@ function getCurrentUserSid() {
   return sid
 }
 
-function protectTokenForCurrentUser(token) {
-  const script = [
-    'Add-Type -AssemblyName System.Security',
-    '$encoded = [Console]::In.ReadToEnd()',
-    '$bytes = [Convert]::FromBase64String($encoded)',
-    '$protected = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)',
-    '[Console]::Out.Write([Convert]::ToBase64String($protected))',
-  ].join('; ')
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    input: Buffer.from(token, 'utf8').toString('base64'),
+function protectTokenForCurrentUser(token, bridgePath) {
+  const protectedToken = execFileSync(bridgePath, ['protect-token'], {
+    input: token,
     encoding: 'utf8',
     windowsHide: true,
+    timeout: 10_000,
   }).trim()
+  if (!protectedToken || !/^[A-Za-z0-9+/]+={0,2}$/.test(protectedToken)) {
+    throw new Error('Bridge 返回的加密令牌无效，请更新桥接组件。')
+  }
+  return protectedToken
 }
 
-function writeBridgeConfig({ pipeName, sessionToken, appPath, configPath, protectToken = protectTokenForCurrentUser }) {
+function writeBridgeConfig({ pipeName, sessionToken, appPath, configPath, bridgePath, protectToken = token => protectTokenForCurrentUser(token, bridgePath) }) {
+  // Native Bridge 使用 ProtectedData.Unprotect，必须写入原始 DPAPI 密文而非 Electron safeStorage 格式。
   const targetPath = configPath || path.join(process.env.LOCALAPPDATA || os.homedir(), 'SafeVault', 'bridge.json')
   const temporaryPath = `${targetPath}.tmp`
   fs.mkdirSync(path.dirname(targetPath), { recursive: true })

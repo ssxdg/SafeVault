@@ -255,6 +255,7 @@ if (!gotTheLock) {
       writeBridgeConfig({
         ...bridgeServer,
         appPath: isDev ? null : process.execPath,
+        bridgePath: getBridgeExecutablePath(),
       })
       await bridgeServer.start()
     } catch (error) {

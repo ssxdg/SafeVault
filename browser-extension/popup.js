@@ -3,7 +3,10 @@ const accountsElement = document.getElementById('accounts')
 
 function statusText(code) {
   const messages = {
-    APP_UNAVAILABLE: 'SafeVault 主程序未运行。',
+    APP_UNAVAILABLE: 'SafeVault 桥接服务不可用，请重启主程序；若仍失败，请检查主程序与桥接组件版本。',
+    NATIVE_HOST_ERROR: '无法启动 SafeVault 桥接组件，请检查扩展 ID、Native Host 注册和安装路径。',
+    TIMEOUT: 'SafeVault 服务启动超时，请手动打开主程序后重试。',
+    EMPTY_RESPONSE: 'SafeVault 未返回有效响应，请重新加载扩展后重试。',
     LOCKED: '密码库已锁定，请先在主程序中解锁。',
     UNTRUSTED_PAGE: '当前页面不支持填充。',
     FIELDS_NOT_FOUND: '未找到可填充的登录表单。',

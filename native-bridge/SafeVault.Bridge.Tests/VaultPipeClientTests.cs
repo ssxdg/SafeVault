@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,35 @@ namespace SafeVault.Bridge.Tests;
 
 public sealed class VaultPipeClientTests
 {
+    [Fact]
+    public async Task ProtectedTokenCommandProducesCompatibleDpapiCiphertext()
+    {
+        var bridgePath = Path.ChangeExtension(typeof(VaultPipeClient).Assembly.Location, ".exe");
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo(bridgePath, "protect-token")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            },
+        };
+        Assert.True(process.Start());
+        const string token = "bridge-session-token";
+        await process.StandardInput.WriteAsync(token);
+        process.StandardInput.Close();
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await process.WaitForExitAsync(timeout.Token);
+        Assert.True(process.ExitCode == 0, error);
+        var decrypted = ProtectedData.Unprotect(
+            Convert.FromBase64String(output), null, DataProtectionScope.CurrentUser);
+        Assert.Equal(token, Encoding.UTF8.GetString(decrypted));
+    }
+
     [Fact]
     public async Task SendAsyncStartsConfiguredAppWhenPipeIsUnavailable()
     {

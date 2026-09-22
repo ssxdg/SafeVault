@@ -143,6 +143,18 @@ async function main() {
     assert.strictEqual(config.appPath, appPath)
     assert.strictEqual(config.protectedToken, `protected:${first.sessionToken.length}`)
     assert.strictEqual(configRaw.includes(first.sessionToken), false)
+
+    writeBridgeConfig({
+      pipeName: first.pipeName,
+      sessionToken: first.sessionToken,
+      appPath,
+      configPath,
+      bridgePath: path.join(__dirname, '../native-bridge/bin/Debug/net8.0-windows/SafeVault.Bridge.exe'),
+    })
+    const protectedConfig = JSON.parse(await fs.readFile(configPath, 'utf8'))
+    const protectedBytes = Buffer.from(protectedConfig.protectedToken, 'base64')
+    assert.strictEqual(protectedBytes.subarray(0, 4).toString('hex'), '01000000')
+    assert.strictEqual(protectedConfig.protectedToken.includes(first.sessionToken), false)
   } finally {
     await fs.rm(configDirectory, { recursive: true, force: true })
   }

@@ -1,6 +1,7 @@
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
+const vm = require('vm')
 
 const extensionDirectory = path.join(__dirname, '..', 'browser-extension')
 const read = file => fs.readFileSync(path.join(extensionDirectory, file), 'utf8')
@@ -111,6 +112,34 @@ function verifyFieldDetection() {
   assert.strictEqual(detectLoginForms(dynamicInputs)[0].kind, 'login')
 }
 
-verifyManifestAndSources()
-verifyFieldDetection()
-console.log('browser extension verification passed')
+async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 服务启动超时，请手动打开主程序后重试。') {
+  const statusElement = { textContent: '' }
+  const accountsElement = { replaceChildren() {} }
+  vm.runInNewContext(read('popup.js'), {
+    document: {
+      getElementById: id => id === 'status' ? statusElement : accountsElement,
+    },
+    chrome: {
+      tabs: {
+        query: async () => [{ id: 1 }],
+        sendMessage: async () => ({ ok: false, code }),
+      },
+    },
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.strictEqual(statusElement.textContent, expected)
+}
+
+async function main() {
+  verifyManifestAndSources()
+  verifyFieldDetection()
+  await verifyPopupTimeoutStatus()
+  await verifyPopupTimeoutStatus('APP_UNAVAILABLE', 'SafeVault 桥接服务不可用，请重启主程序；若仍失败，请检查主程序与桥接组件版本。')
+  await verifyPopupTimeoutStatus('NATIVE_HOST_ERROR', '无法启动 SafeVault 桥接组件，请检查扩展 ID、Native Host 注册和安装路径。')
+  console.log('browser extension verification passed')
+}
+
+main().catch(error => {
+  console.error(error)
+  process.exitCode = 1
+})
