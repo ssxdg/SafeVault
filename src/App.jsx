@@ -770,7 +770,7 @@ function App() {
         onDeleteTheme={deleteActiveCustomTheme}
         canDeleteTheme={Boolean(activeCustomTheme)}
         onLock={handleVaultLock}
-        idleTimeoutMinutes={vaultStatus.idleTimeoutMinutes || 15}
+        idleTimeoutMinutes={vaultStatus.idleTimeoutMinutes ?? 15}
         onIdleTimeoutChange={setIdleTimeoutMinutes}
         onWindowClose={handleWindowClose}
       />
@@ -829,7 +829,10 @@ function App() {
       />
       <AppDialog dialog={dialog} onClose={closeDialog} onConfirm={confirmDialog} />
       {isBrowserSettingsOpen && (
-        <BrowserExtensionSettings onClose={() => setIsBrowserSettingsOpen(false)} />
+        <BrowserExtensionSettings
+          onClose={() => setIsBrowserSettingsOpen(false)}
+          onAlert={showInfo}
+        />
       )}
     </div>
   )

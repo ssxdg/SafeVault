@@ -1,6 +1,6 @@
 {
   "name": "safe-vault",
-  "version": "3.3.4",
+  "version": "4.0.0",
   "description": "密码保险箱 - 个人账号密码管理器",
   "author": "SafeVault Team",
   "main": "electron/main.js",
@@ -14,7 +14,7 @@
     "verify:extension": "node scripts/verify-extension.cjs",
     "verify:native-host": "node scripts/verify-native-host-manager.cjs",
     "verify:dotnet": "dotnet test native-bridge/SafeVault.Bridge.Tests/SafeVault.Bridge.Tests.csproj",
-    "verify": "node scripts/verify-normalize-data.cjs && node scripts/verify-vault-crypto.cjs && node scripts/verify-vault-migration.cjs && node scripts/verify-vault-session.cjs && node scripts/verify-credential-matcher.cjs && node scripts/verify-clipboard-manager.cjs && node scripts/verify-bridge-server.cjs && node scripts/verify-extension.cjs && node scripts/verify-native-host-manager.cjs && node scripts/verify-theme-wiring.cjs && node scripts/verify-window-state.cjs && node scripts/verify-security-boundaries.cjs && npm run verify:dotnet",
+    "verify": "node scripts/verify-normalize-data.cjs && node scripts/verify-vault-crypto.cjs && node scripts/verify-vault-migration.cjs && node scripts/verify-vault-session.cjs && node scripts/verify-app-settings.cjs && node scripts/verify-credential-matcher.cjs && node scripts/verify-clipboard-manager.cjs && node scripts/verify-bridge-server.cjs && node scripts/verify-extension.cjs && node scripts/verify-native-host-manager.cjs && node scripts/verify-theme-wiring.cjs && node scripts/verify-window-state.cjs && node scripts/verify-security-boundaries.cjs && npm run verify:dotnet",
     "build:bridge": "dotnet publish native-bridge/SafeVault.Bridge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o native-bridge/publish",
     "package:extension": "node scripts/package-browser-extension.cjs"
   },

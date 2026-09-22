@@ -105,10 +105,39 @@ async function main() {
   assert.strictEqual(stateChanges.some(status => status.state === 'unlocked'), true)
   assert.strictEqual(stateChanges.at(-1).reason, 'manual')
 
-  assert.throws(() => session.setIdleTimeoutMinutes(10), /只支持 5、15、30 或 60 分钟/)
   await assert.rejects(() => session.requireData(), /密码库尚未解锁/)
 
   session.dispose()
+
+  const customClock = createClock()
+  const customSession = new VaultSession({
+    unlock: async () => ({ success: true, data: { schemaVersion: 3 } }),
+    lock: async () => ({ success: true }),
+    now: customClock.now,
+    setTimer: customClock.setTimeout,
+    clearTimer: customClock.clearTimeout,
+    idleTimeoutMinutes: 10,
+  })
+  await customSession.unlock('correct-password')
+  customClock.advanceBy(10 * 60 * 1000 + 1)
+  assert.strictEqual(customSession.getStatus().state, 'locked', 'custom minute value should lock the session')
+
+  const neverLockClock = createClock()
+  const neverLockSession = new VaultSession({
+    unlock: async () => ({ success: true, data: { schemaVersion: 3 } }),
+    lock: async () => ({ success: true }),
+    now: neverLockClock.now,
+    setTimer: neverLockClock.setTimeout,
+    clearTimer: neverLockClock.clearTimeout,
+    idleTimeoutMinutes: 0,
+  })
+  await neverLockSession.unlock('correct-password')
+  neverLockClock.advanceBy(365 * 24 * 60 * 60 * 1000)
+  assert.strictEqual(neverLockSession.getStatus().state, 'unlocked', 'zero should disable only the idle lock timer')
+  assert.throws(() => neverLockSession.setIdleTimeoutMinutes(-1), /1 到 1440 分钟或不自动锁定/)
+  assert.throws(() => neverLockSession.setIdleTimeoutMinutes(1441), /1 到 1440 分钟或不自动锁定/)
+  assert.throws(() => neverLockSession.setIdleTimeoutMinutes(1.5), /1 到 1440 分钟或不自动锁定/)
+
   console.log('vault session verification passed')
 }
 

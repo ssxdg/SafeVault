@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
+const IDLE_TIMEOUT_PRESETS = [5, 15, 30, 60]
+
 function TitleBar({
   theme = 'secure',
   themeOptions = [],
@@ -17,6 +19,17 @@ function TitleBar({
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
+  const [customIdleMinutes, setCustomIdleMinutes] = useState(() => String(idleTimeoutMinutes || 15))
+  const [isCustomEditing, setIsCustomEditing] = useState(false)
+  const timeoutMode = isCustomEditing
+    ? 'custom'
+    : idleTimeoutMinutes === 0
+    ? 'never'
+    : IDLE_TIMEOUT_PRESETS.includes(idleTimeoutMinutes) ? String(idleTimeoutMinutes) : 'custom'
+
+  useEffect(() => {
+    if (idleTimeoutMinutes > 0) setCustomIdleMinutes(String(idleTimeoutMinutes))
+  }, [idleTimeoutMinutes])
 
   // 同步窗口状态
   useEffect(() => {
@@ -76,6 +89,32 @@ function TitleBar({
     }
   }
 
+  const handleTimeoutModeChange = (value) => {
+    if (value === 'never') {
+      setIsCustomEditing(false)
+      onIdleTimeoutChange?.(0)
+      return
+    }
+    if (value === 'custom') {
+      setIsCustomEditing(true)
+      setCustomIdleMinutes(idleTimeoutMinutes > 0 ? String(idleTimeoutMinutes) : '15')
+      return
+    }
+    setIsCustomEditing(false)
+    onIdleTimeoutChange?.(Number(value))
+  }
+
+  const applyCustomIdleTimeout = () => {
+    const minutes = Number(customIdleMinutes)
+    if (Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440) {
+      setIsCustomEditing(false)
+      onIdleTimeoutChange?.(minutes)
+      return
+    }
+    setCustomIdleMinutes(idleTimeoutMinutes > 0 ? String(idleTimeoutMinutes) : '15')
+    setIsCustomEditing(false)
+  }
+
   return (
     <div className="titlebar">
       <div className="titlebar-left">
@@ -85,14 +124,33 @@ function TitleBar({
       <div className="titlebar-controls">
         <select
           className="vault-timeout-select"
-          value={idleTimeoutMinutes}
-          onChange={(event) => onIdleTimeoutChange?.(Number(event.target.value))}
+          value={timeoutMode}
+          onChange={(event) => handleTimeoutModeChange(event.target.value)}
           title="无操作自动锁定时间"
         >
-          {[5, 15, 30, 60].map(minutes => (
+          {IDLE_TIMEOUT_PRESETS.map(minutes => (
             <option key={minutes} value={minutes}>{minutes} 分钟锁定</option>
           ))}
+          <option value="custom">自定义时间</option>
+          <option value="never">不自动锁定</option>
         </select>
+        {timeoutMode === 'custom' && (
+          <input
+            className="vault-timeout-input"
+            type="number"
+            min="1"
+            max="1440"
+            step="1"
+            value={customIdleMinutes}
+            onChange={event => setCustomIdleMinutes(event.target.value)}
+            onBlur={applyCustomIdleTimeout}
+            onKeyDown={event => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+            }}
+            aria-label="自定义自动锁定分钟数"
+            title="输入 1 到 1440 分钟"
+          />
+        )}
         <button className="titlebar-btn" onClick={onLock} title="立即锁定密码库">
           🔒
         </button>

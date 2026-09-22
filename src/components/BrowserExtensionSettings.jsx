@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/
 
-function BrowserExtensionSettings({ onClose }) {
+function BrowserExtensionSettings({ onClose, onAlert }) {
   const [chromeExtensionId, setChromeExtensionId] = useState('')
   const [edgeExtensionId, setEdgeExtensionId] = useState('')
   const [useSameId, setUseSameId] = useState(true)
@@ -57,6 +57,12 @@ function BrowserExtensionSettings({ onClose }) {
     }
     setStatus(result)
     setMessage('注册成功。请在浏览器扩展页面重新加载 SafeVault 扩展。')
+    onAlert?.({
+      type: 'success',
+      title: '扩展配置完成',
+      message: 'Chrome 和 Edge Native Host 配置已保存。',
+      detail: '请在浏览器扩展页面重新加载 SafeVault 扩展。',
+    })
   }
 
   const handleUnregister = async () => {
@@ -75,6 +81,12 @@ function BrowserExtensionSettings({ onClose }) {
     }
     setStatus(previous => ({ ...previous, registered: false }))
     setMessage('Native Host 注册已移除，密码库数据未修改。')
+    onAlert?.({
+      type: 'success',
+      title: '扩展配置已移除',
+      message: 'Native Host 注册已取消。',
+      detail: '加密密码库数据未被修改。',
+    })
   }
 
   return (

@@ -1,5 +1,8 @@
-const ALLOWED_IDLE_TIMEOUTS = new Set([5, 15, 30, 60])
 const MAX_RETRY_DELAY_MS = 30_000
+
+function isValidIdleTimeoutMinutes(minutes) {
+  return Number.isInteger(minutes) && minutes >= 0 && minutes <= 1440
+}
 
 class VaultSession {
   constructor({
@@ -14,8 +17,8 @@ class VaultSession {
     if (typeof unlock !== 'function' || typeof lock !== 'function') {
       throw new Error('VaultSession 需要 unlock 和 lock 函数。')
     }
-    if (!ALLOWED_IDLE_TIMEOUTS.has(idleTimeoutMinutes)) {
-      throw new Error('自动锁定只支持 5、15、30 或 60 分钟。')
+    if (!isValidIdleTimeoutMinutes(idleTimeoutMinutes)) {
+      throw new Error('自动锁定时间必须是 1 到 1440 分钟或不自动锁定。')
     }
 
     this.unlockHandler = unlock
@@ -121,8 +124,8 @@ class VaultSession {
   }
 
   setIdleTimeoutMinutes(minutes) {
-    if (!ALLOWED_IDLE_TIMEOUTS.has(minutes)) {
-      throw new Error('自动锁定只支持 5、15、30 或 60 分钟。')
+    if (!isValidIdleTimeoutMinutes(minutes)) {
+      throw new Error('自动锁定时间必须是 1 到 1440 分钟或不自动锁定。')
     }
     this.idleTimeoutMinutes = minutes
     if (this.state === 'unlocked') this.scheduleIdleLock()
@@ -137,6 +140,7 @@ class VaultSession {
 
   scheduleIdleLock() {
     this.clearIdleTimer()
+    if (this.idleTimeoutMinutes === 0) return
     this.idleTimer = this.setTimer(() => {
       this.idleTimer = null
       void this.lock('idle')
@@ -153,4 +157,4 @@ class VaultSession {
   }
 }
 
-module.exports = { VaultSession }
+module.exports = { VaultSession, isValidIdleTimeoutMinutes }

@@ -9,6 +9,7 @@ const { createClipboardManager } = require('./clipboardManager')
 const { normalizeWebsiteOrigin, normalizeExecutablePath, findCredentialsForApp, findMatchingAppTarget } = require('./credentialMatcher')
 const { createBridgeServer, getCurrentUserSid, writeBridgeConfig } = require('./bridgeServer')
 const { createNativeHostManager } = require('./nativeHostManager')
+const { createAppSettingsManager } = require('./appSettingsManager')
 
 const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
@@ -31,6 +32,7 @@ let vaultSession
 let clipboardManager
 let bridgeServer
 let nativeHostManager
+let appSettingsManager
 
 function getBridgeExecutablePath() {
   return isDev
@@ -197,6 +199,8 @@ if (!gotTheLock) {
 
   // 只有获得单实例锁的应用才启动
   app.whenReady().then(async () => {
+    appSettingsManager = createAppSettingsManager()
+    const appSettings = appSettingsManager.readSettings()
     nativeHostManager = createNativeHostManager({
       bridgePath: getBridgeExecutablePath(),
       manifestDirectory: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'SafeVault', 'NativeMessagingHosts'),
@@ -208,6 +212,7 @@ if (!gotTheLock) {
     vaultSession = new VaultSession({
       unlock: password => fileManager.unlockVault(password),
       lock: () => fileManager.lockVault(),
+      idleTimeoutMinutes: appSettings.idleTimeoutMinutes,
       onStateChange: status => {
         if (status.state === 'locked') clipboardManager.clearOwnedSecret()
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -539,12 +544,10 @@ ipcMain.handle('vault-touch', () => {
   return vaultSession.getStatus()
 })
 ipcMain.handle('vault-set-idle-timeout', (event, minutes) => {
-  try {
-    vaultSession.setIdleTimeoutMinutes(minutes)
-    return { success: true, status: vaultSession.getStatus() }
-  } catch (error) {
-    return { success: false, error: error.message }
-  }
+  const saveResult = appSettingsManager.saveIdleTimeoutMinutes(minutes)
+  if (!saveResult.success) return saveResult
+  vaultSession.setIdleTimeoutMinutes(minutes)
+  return { success: true, status: vaultSession.getStatus() }
 })
 ipcMain.handle('vault-copy-secret', (event, value, ttlMs = 30_000) => {
   if (vaultSession.getStatus().state !== 'unlocked') {
