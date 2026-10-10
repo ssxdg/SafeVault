@@ -16,8 +16,16 @@ function AppDialog({ dialog, onClose, onConfirm }) {
   }
   const tone = dialog.type || (isConfirm ? 'warning' : 'info')
 
+  const handleEscape = (event) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    // 提示框已有输入时保留内容，等待用户通过按钮明确处理。
+    if (!isPrompt || !inputValue) onClose()
+  }
+
   return (
-    <div className="app-dialog-overlay" onMouseDown={onClose}>
+    <div className="app-dialog-overlay" onMouseDown={() => { if (!isPrompt || !inputValue) onClose() }} onKeyDownCapture={handleEscape}>
       <div className="app-dialog" onMouseDown={(e) => e.stopPropagation()}>
         <div className={`app-dialog-icon ${tone}`}>{iconMap[tone] || 'i'}</div>
         <div className="app-dialog-content">

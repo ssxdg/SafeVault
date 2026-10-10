@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 
 const createTargetId = () => `target-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-function LoginTargetEditor({ value = [], onChange }) {
+function LoginTargetEditor({ value = [], onChange, onDraftChange }) {
   const [website, setWebsite] = useState('')
   const [error, setError] = useState('')
   const [isCapturing, setIsCapturing] = useState(false)
@@ -32,6 +32,7 @@ function LoginTargetEditor({ value = [], onChange }) {
       enabled: true,
     }])
     setWebsite('')
+    onDraftChange?.('')
   }
 
   const addExecutable = async () => {
@@ -96,7 +97,7 @@ function LoginTargetEditor({ value = [], onChange }) {
         <input
           type="url"
           value={website}
-          onChange={event => setWebsite(event.target.value)}
+          onChange={event => { setWebsite(event.target.value); onDraftChange?.(event.target.value) }}
           placeholder="https://login.example.com"
         />
         <button type="button" className="btn btn-secondary btn-sm" onClick={addWebsite}>添加网站</button>

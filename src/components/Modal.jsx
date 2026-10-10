@@ -14,15 +14,58 @@ function Modal({ modal, onSave, onClose }) {
       ? { ...ACCOUNT_DEFAULTS, ...(isEdit ? data : {}) }
       : { ...URL_DEFAULTS, ...(isEdit ? data : {}) }
   )
+  const initialFormRef = useRef(form)
+  const autoWebsiteTargetIdRef = useRef('')
+  const syncRequestRef = useRef(0)
+  const [websiteDraft, setWebsiteDraft] = useState('')
+  const [loginUrlError, setLoginUrlError] = useState('')
 
   const firstInputRef = useRef(null)
   useEffect(() => { firstInputRef.current?.focus() }, [])
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }))
 
-  const handleSubmit = (e) => {
+  const syncLoginTarget = async (currentForm) => {
+    const requestId = ++syncRequestRef.current
+    const loginUrl = currentForm.loginUrl?.trim()
+    let origin = ''
+    if (loginUrl) {
+      const result = await window.electronAPI?.normalizeWebsiteTarget?.(loginUrl)
+      if (requestId !== syncRequestRef.current) return currentForm
+      origin = result?.success ? result.origin : ''
+      setLoginUrlError(origin ? '' : (result?.error || '请输入完整的 HTTP 或 HTTPS 网站地址。'))
+    } else {
+      setLoginUrlError('')
+    }
+
+    // 只替换由登录网址自动生成的规则，保留用户手动配置的其他网站和程序目标。
+    const previousTargetId = autoWebsiteTargetIdRef.current
+    const id = `target-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const withTarget = (value) => {
+      const targets = (Array.isArray(value.loginTargets) ? value.loginTargets : [])
+        .filter(target => target.id !== previousTargetId || target.origin === origin)
+      if (origin && !targets.some(target => target.type === 'website' && target.origin === origin)) {
+        targets.push({ id, type: 'website', origin, enabled: true })
+      }
+      return { ...value, loginTargets: targets }
+    }
+    const nextForm = withTarget(currentForm)
+    if (nextForm.loginTargets.some(target => target.id === id)) autoWebsiteTargetIdRef.current = id
+    setForm(previous => previous.loginUrl === currentForm.loginUrl ? withTarget(previous) : previous)
+    return nextForm
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    onSave(form)
+    onSave(isAccount ? await syncLoginTarget(form) : form)
+  }
+
+  const handleEscape = (event) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    // 有未保存的表单内容或网站草稿时，只允许通过可见按钮手动关闭。
+    if (JSON.stringify(form) === JSON.stringify(initialFormRef.current) && !websiteDraft) onClose()
   }
 
   
@@ -31,7 +74,7 @@ function Modal({ modal, onSave, onClose }) {
     : (isEdit ? '编辑网址' : '添加网址')
 
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay" onKeyDownCapture={handleEscape}>
       <div className="modal">
         <div className="modal-header">
           <span className="modal-title">{title}</span>
@@ -84,9 +127,11 @@ function Modal({ modal, onSave, onClose }) {
                 <input
                   type="text"
                   value={form.loginUrl}
-                  onChange={(e) => set('loginUrl', e.target.value)}
+                  onChange={(e) => { syncRequestRef.current += 1; set('loginUrl', e.target.value); setLoginUrlError('') }}
+                  onBlur={() => { void syncLoginTarget(form) }}
                   placeholder="此账号登录的网址，如：https://gmail.com"
                 />
+                {loginUrlError && <div className="login-target-error">{loginUrlError}</div>}
               </div>
               <div className="form-group">
                 <label>备注</label>
@@ -100,6 +145,7 @@ function Modal({ modal, onSave, onClose }) {
               <LoginTargetEditor
                 value={form.loginTargets}
                 onChange={loginTargets => set('loginTargets', loginTargets)}
+                onDraftChange={setWebsiteDraft}
               />
             </>
           ) : (

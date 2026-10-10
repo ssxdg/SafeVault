@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/
 
@@ -10,6 +10,7 @@ function BrowserExtensionSettings({ onClose, onAlert }) {
   const [message, setMessage] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isConfirmingUnregister, setIsConfirmingUnregister] = useState(false)
+  const savedIdsRef = useRef({ chromeExtensionId: '', edgeExtensionId: '', useSameId: true })
 
   const loadStatus = async () => {
     const result = await window.electronAPI?.getNativeHostStatus?.()
@@ -20,7 +21,13 @@ function BrowserExtensionSettings({ onClose, onAlert }) {
     setStatus(result)
     setChromeExtensionId(result.chromeExtensionId || '')
     setEdgeExtensionId(result.edgeExtensionId || '')
-    setUseSameId(!result.edgeExtensionId || result.chromeExtensionId === result.edgeExtensionId)
+    const sameId = !result.edgeExtensionId || result.chromeExtensionId === result.edgeExtensionId
+    setUseSameId(sameId)
+    savedIdsRef.current = {
+      chromeExtensionId: result.chromeExtensionId || '',
+      edgeExtensionId: result.edgeExtensionId || '',
+      useSameId: sameId,
+    }
   }
 
   useEffect(() => { void loadStatus() }, [])
@@ -56,6 +63,7 @@ function BrowserExtensionSettings({ onClose, onAlert }) {
       return
     }
     setStatus(result)
+    savedIdsRef.current = { chromeExtensionId, edgeExtensionId: effectiveEdgeId, useSameId }
     setMessage('注册成功。请在浏览器扩展页面重新加载 SafeVault 扩展。')
     onAlert?.({
       type: 'success',
@@ -89,8 +97,18 @@ function BrowserExtensionSettings({ onClose, onAlert }) {
     })
   }
 
+  const handleEscape = (event) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    // 扩展 ID 有未保存改动时，不允许 Esc 丢弃输入。
+    if (!isSaving && !hasUnsavedIds()) onClose()
+  }
+
+  const hasUnsavedIds = () => JSON.stringify({ chromeExtensionId, edgeExtensionId, useSameId }) !== JSON.stringify(savedIdsRef.current)
+
   return (
-    <div className="modal-overlay" role="presentation" onMouseDown={onClose}>
+    <div className="modal-overlay" role="presentation" onMouseDown={() => { if (!hasUnsavedIds()) onClose() }} onKeyDownCapture={handleEscape}>
       <div className="modal browser-extension-settings" role="dialog" aria-modal="true" aria-labelledby="browser-extension-settings-title" onMouseDown={event => event.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title" id="browser-extension-settings-title">浏览器扩展设置</span>
@@ -104,6 +122,7 @@ function BrowserExtensionSettings({ onClose, onAlert }) {
             <label htmlFor="chrome-extension-id">Chrome 扩展 ID</label>
             <input
               id="chrome-extension-id"
+              autoFocus
               value={chromeExtensionId}
               onChange={event => handleChromeIdChange(event.target.value)}
               placeholder="32 位 a-p 字符"

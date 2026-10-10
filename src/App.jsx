@@ -230,6 +230,16 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
+        if (dialog) {
+          event.preventDefault()
+          if (!document.querySelector('.app-dialog-input')?.value) closeDialog()
+          return
+        }
+        // 表单弹窗自行判断是否有未保存内容；焦点暂时在弹窗外时也不能隐藏主窗口。
+        if (document.querySelector('.modal-overlay')) {
+          event.preventDefault()
+          return
+        }
         // ESC 必须复用标题栏关闭按钮的同一条保存+隐藏流程，保证交互入口行为一致。
         event.preventDefault()
         handleWindowClose()
@@ -238,7 +248,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleWindowClose])
+  }, [closeDialog, dialog, handleWindowClose])
 
   useEffect(() => {
     if (!window.electronAPI?.onBeforeAppQuit) return undefined
