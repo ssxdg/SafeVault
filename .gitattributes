@@ -1,0 +1,2 @@
+# 保留项目内 .NET SDK 的原始文件内容，避免 Git 换行符转换破坏工具文件。
+tools/dotnet-sdk/** -text -diff

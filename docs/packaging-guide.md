@@ -6,18 +6,15 @@
 
 - Windows 10/11。
 - Node.js 18+、npm 9+。
-- .NET 8 SDK；`Native Bridge` 的验证和发布都需要它。安装或更改用户环境变量后，重新打开 PowerShell；若使用 IDE 内置终端，还需重启 IDE。然后确认 `dotnet --version` 可运行。
+- .NET 8 SDK；`Native Bridge` 的验证和发布都需要它。本工作区已缓存于 `tools/dotnet-sdk/`，其中应有 `dotnet.exe`。
 
-若 SDK 通过解压方式安装，还需要在执行 `npm run verify` 或 `npm run build` 的同一个 PowerShell 中设置 SDK 目录。例如安装在当前用户的 `.dotnet` 目录时：
+`npm run verify` 和 `npm run build` 会优先使用项目内的 SDK，自动为子进程设置 `PATH` 与 `DOTNET_ROOT`，无需在终端手动配置。确认本地缓存：
 
 ```powershell
-$sdkDir = Join-Path $env:USERPROFILE '.dotnet'
-$env:DOTNET_ROOT = $sdkDir
-$env:Path = "$sdkDir;$env:Path"
-dotnet --version
+.\tools\dotnet-sdk\dotnet.exe --version
 ```
 
-`PATH` 让构建命令找到 `dotnet`；`DOTNET_ROOT` 让验证脚本启动的 `SafeVault.Bridge.exe` 找到 .NET 运行时。只设置其中一个仍可能导致命令失败。
+项目内 SDK 已纳入 Git；在 Windows x64 电脑克隆完整仓库后，无需另行下载 SDK，`npm ci` 也不会删除它。若只复制部分源码而没有 `tools/dotnet-sdk/`，脚本会改用系统安装的 SDK。该目录体积较大，发布安装包时不会包含这份构建用 SDK。
 
 首次打包或依赖尚未安装时，按锁文件安装：
 
@@ -61,6 +58,6 @@ npm run build
 
 ## 常见问题
 
-- `dotnet` 无法识别或提示找不到 `hostfxr.dll`：确认已安装 .NET 8 SDK，并按上面的命令同时设置 `PATH` 和 `DOTNET_ROOT`；更改用户环境变量后重新打开终端。
+- `dotnet` 无法识别或提示找不到 `hostfxr.dll`：确认 `tools/dotnet-sdk/dotnet.exe` 和 `tools/dotnet-sdk/host/fxr/` 都存在，再使用 `npm run verify` 或 `npm run build`。直接执行 `dotnet` 或 `npm run build:bridge` 时仍依赖终端环境变量。
 - 图标或 `winCodeSign` 处理报权限错误：在 Windows 设置中开启“开发人员模式”，再重新运行 `npm run build`。
 - 找不到本次安装包：检查 `npm run build` 是否完整结束，再按版本号筛选 `release/`；该目录可能保留旧产物。
