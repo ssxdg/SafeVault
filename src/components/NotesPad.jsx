@@ -224,6 +224,8 @@ function NotesPad({
     setDelta(normalizeToDelta(activeNote?.content))
     setSaved(true)
     setMarkdownHint(null)
+    setTablePicker(null)
+    tableRangeRef.current = null
     dismissedHintRef.current = ''
     hintKeyRef.current = ''
   }, [activeNote?.id])
