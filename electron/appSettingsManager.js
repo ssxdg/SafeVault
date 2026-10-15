@@ -1,7 +1,11 @@
 const fs = require('fs')
 const path = require('path')
 
-const DEFAULT_APP_SETTINGS = Object.freeze({ idleTimeoutMinutes: 15 })
+const DEFAULT_APP_SETTINGS = Object.freeze({ idleTimeoutMinutes: 15, iconId: 4 })
+
+function isValidIconId(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 4
+}
 
 function isValidIdleTimeoutMinutes(value) {
   return Number.isInteger(value) && value >= 0 && value <= 1440
@@ -22,7 +26,10 @@ function createAppSettingsManager({ settingsFile, fsApi = fs } = {}) {
   function readSettings() {
     try {
       const parsed = JSON.parse(fsApi.readFileSync(targetFile, 'utf8'))
-      return { idleTimeoutMinutes: normalizeIdleTimeoutMinutes(parsed?.idleTimeoutMinutes) }
+      return {
+        idleTimeoutMinutes: normalizeIdleTimeoutMinutes(parsed?.idleTimeoutMinutes),
+        iconId: isValidIconId(parsed?.iconId) ? parsed.iconId : DEFAULT_APP_SETTINGS.iconId,
+      }
     } catch {
       return { ...DEFAULT_APP_SETTINGS }
     }
@@ -35,7 +42,7 @@ function createAppSettingsManager({ settingsFile, fsApi = fs } = {}) {
     try {
       fsApi.mkdirSync(path.dirname(targetFile), { recursive: true })
       const temporaryFile = `${targetFile}.tmp`
-      const settings = { idleTimeoutMinutes: minutes }
+      const settings = { ...readSettings(), idleTimeoutMinutes: minutes }
       fsApi.writeFileSync(temporaryFile, JSON.stringify(settings, null, 2), 'utf8')
       fsApi.renameSync(temporaryFile, targetFile)
       return { success: true, settings }
@@ -44,11 +51,27 @@ function createAppSettingsManager({ settingsFile, fsApi = fs } = {}) {
     }
   }
 
-  return { readSettings, saveIdleTimeoutMinutes }
+  function saveIconId(iconId) {
+    if (!isValidIconId(iconId)) return { success: false, error: '无效的图标选项。' }
+    try {
+      fsApi.mkdirSync(path.dirname(targetFile), { recursive: true })
+      const temporaryFile = `${targetFile}.tmp`
+      // 与自动锁定设置写入同一文件时保留其他设置，避免切换图标覆盖锁定时间。
+      const settings = { ...readSettings(), iconId }
+      fsApi.writeFileSync(temporaryFile, JSON.stringify(settings, null, 2), 'utf8')
+      fsApi.renameSync(temporaryFile, targetFile)
+      return { success: true, settings }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  }
+
+  return { readSettings, saveIdleTimeoutMinutes, saveIconId }
 }
 
 module.exports = {
   DEFAULT_APP_SETTINGS,
   createAppSettingsManager,
   normalizeIdleTimeoutMinutes,
+  isValidIconId,
 }

@@ -8,6 +8,17 @@ import AppDialog from './components/AppDialog'
 import VaultUnlock from './components/VaultUnlock'
 import BrowserExtensionSettings from './components/BrowserExtensionSettings'
 import { useVaultSession } from './hooks/useVaultSession'
+import iconOne from './images/icon-1.png'
+import iconTwo from './images/icon-2.png'
+import iconThree from './images/icon-3.png'
+import iconFour from './images/icon.png'
+
+const APP_ICON_OPTIONS = [
+  { value: 1, label: '深色盾牌', image: iconOne },
+  { value: 2, label: '蓝色玻璃锁', image: iconTwo },
+  { value: 3, label: '紫色记事本', image: iconThree },
+  { value: 4, label: '黑金文档锁', image: iconFour },
+]
 
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2)
 // 内置主题仍然保留为固定选项，自定义主题会在运行时追加到这个列表后面。
@@ -49,6 +60,7 @@ function App() {
   } = useVaultSession()
   const [data, setData] = useState(null)
   const [customThemes, setCustomThemes] = useState([])
+  const [iconId, setIconId] = useState(4)
   const [activeTabId, setActiveTabId] = useState(null)
   const [activeSection, setActiveSection] = useState('tabs')
   // 账号区会在切换到记事本时卸载；视图模式放在 App 层才能让用户切回来时保留列表/卡片选择。
@@ -80,6 +92,14 @@ function App() {
   const toggleSidebarCollapsed = useCallback(() => {
     // 保留手动开关入口，用户在大窗口或小窗口下都可以按自己的当前任务选择是否显示标签列表。
     setIsSidebarCollapsed(prev => !prev)
+  }, [])
+
+  useEffect(() => {
+    // 图标设置独立于加密数据，锁定页和重新启动后仍使用用户选中的图标。
+    if (!window.electronAPI?.getAppIcon) return
+    window.electronAPI.getAppIcon().then(value => {
+      if (APP_ICON_OPTIONS.some(option => option.value === value)) setIconId(value)
+    }).catch(error => console.error('读取应用图标设置失败：', error))
   }, [])
 
   useEffect(() => {
@@ -743,9 +763,22 @@ function App() {
     })),
   ], [customThemes])
 
+  const handleIconChange = async (nextIconId) => {
+    try {
+      const result = await window.electronAPI?.setAppIcon?.(nextIconId)
+      if (result?.success) setIconId(result.iconId)
+      else showStatus(result?.error || '切换图标失败')
+    } catch (error) {
+      showStatus(`切换图标失败：${error.message}`)
+    }
+  }
+
+  const selectedIcon = APP_ICON_OPTIONS.find(option => option.value === iconId)?.image || iconFour
+
   if (vaultStatus.state !== 'unlocked') {
     return (
       <VaultUnlock
+        appIcon={selectedIcon}
         status={vaultStatus}
         onUnlock={unlockVault}
         onCreate={createVault}
@@ -773,6 +806,10 @@ function App() {
   return (
     <div className="app" data-theme={rootTheme} style={customThemeVariables}>
       <TitleBar
+        appIcon={selectedIcon}
+        iconId={iconId}
+        iconOptions={APP_ICON_OPTIONS}
+        onIconChange={handleIconChange}
         theme={data.theme || 'secure'}
         themeOptions={themeOptions}
         onThemeChange={setTheme}

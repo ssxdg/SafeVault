@@ -15,10 +15,12 @@ const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
 const TOPMOST_WINDOW_LEVEL = 'screen-saver'
 
-// 图标路径：开发环境用源码目录，打包后用 extraResources
-const iconPath = isDev
-  ? path.join(__dirname, '../src/images/icon.png')
-  : path.join(process.resourcesPath, 'icon.png')
+// 打包后的图标统一放在 extraResources/icons，第四张同时是安装包默认图标。
+const iconDirectory = isDev
+  ? path.join(__dirname, '../src/images')
+  : path.join(process.resourcesPath, 'icons')
+const getIconPath = iconId => path.join(iconDirectory, iconId === 4 ? 'icon.png' : `icon-${iconId}.png`)
+let currentIconId = 4
 
 let mainWindow
 let tray
@@ -201,6 +203,7 @@ if (!gotTheLock) {
   app.whenReady().then(async () => {
     appSettingsManager = createAppSettingsManager()
     const appSettings = appSettingsManager.readSettings()
+    currentIconId = appSettings.iconId
     nativeHostManager = createNativeHostManager({
       bridgePath: getBridgeExecutablePath(),
       manifestDirectory: path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'SafeVault', 'NativeMessagingHosts'),
@@ -323,7 +326,7 @@ function createWindow() {
     minWidth: windowStateManager.MIN_WINDOW_SIZE.width,
     minHeight: windowStateManager.MIN_WINDOW_SIZE.height,
     frame: false,
-    icon: iconPath,
+    icon: getIconPath(currentIconId),
     // 立即显示窗口，背景色与标题栏一致，避免白屏等待
     backgroundColor: '#1E293B',
     webPreferences: {
@@ -478,7 +481,7 @@ function setMainWindowAlwaysOnTop(alwaysOnTop) {
 }
 
 function createTray() {
-  tray = new Tray(iconPath)
+  tray = new Tray(getIconPath(currentIconId))
   tray.setToolTip('密码保险箱')
 
   const contextMenu = Menu.buildFromTemplate([
@@ -523,6 +526,18 @@ ipcMain.handle('window-toggle-top', (event, alwaysOnTop) => setMainWindowAlwaysO
 // Window state IPC
 ipcMain.handle('get-window-state', () => {
   return getMainWindowState()
+})
+ipcMain.handle('get-app-icon', () => currentIconId)
+ipcMain.handle('set-app-icon', (event, iconId) => {
+  if (![1, 2, 3, 4].includes(iconId)) return { success: false, error: '无效的图标选项。' }
+  const icon = nativeImage.createFromPath(getIconPath(iconId))
+  if (icon.isEmpty()) return { success: false, error: '图标文件不存在或无法读取。' }
+  const result = appSettingsManager.saveIconId(iconId)
+  if (!result.success) return result
+  currentIconId = iconId
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(icon)
+  if (tray) tray.setImage(icon)
+  return { success: true, iconId }
 })
 
 // File operation IPC

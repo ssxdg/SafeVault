@@ -16,20 +16,22 @@ const settingsFile = path.join(directory, 'settings.json')
 
 try {
   const manager = settingsApi.createAppSettingsManager({ settingsFile })
-  assert.deepStrictEqual(manager.readSettings(), { idleTimeoutMinutes: 15 })
+  assert.deepStrictEqual(manager.readSettings(), { idleTimeoutMinutes: 15, iconId: 4 })
   assert.deepStrictEqual(manager.saveIdleTimeoutMinutes(90), {
     success: true,
-    settings: { idleTimeoutMinutes: 90 },
+    settings: { idleTimeoutMinutes: 90, iconId: 4 },
   })
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(settingsFile, 'utf8')), { idleTimeoutMinutes: 90 })
-  assert.deepStrictEqual(manager.saveIdleTimeoutMinutes(0).settings, { idleTimeoutMinutes: 0 })
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(settingsFile, 'utf8')), { idleTimeoutMinutes: 90, iconId: 4 })
+  assert.deepStrictEqual(manager.saveIconId(2).settings, { idleTimeoutMinutes: 90, iconId: 2 })
+  assert.deepStrictEqual(manager.saveIdleTimeoutMinutes(0).settings, { idleTimeoutMinutes: 0, iconId: 2 })
   assert.strictEqual(manager.readSettings().idleTimeoutMinutes, 0)
+  assert.strictEqual(manager.readSettings().iconId, 2)
   assert.deepStrictEqual(manager.saveIdleTimeoutMinutes(1441), {
     success: false,
     error: '自动锁定时间必须是 1 到 1440 分钟，或选择不自动锁定。',
   })
   fs.writeFileSync(settingsFile, '{invalid json', 'utf8')
-  assert.deepStrictEqual(manager.readSettings(), { idleTimeoutMinutes: 15 })
+  assert.deepStrictEqual(manager.readSettings(), { idleTimeoutMinutes: 15, iconId: 4 })
 } finally {
   fs.rmSync(directory, { recursive: true, force: true })
 }

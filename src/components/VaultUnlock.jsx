@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react'
-import appIcon from '../images/icon.png'
 
-function VaultUnlock({ status, onUnlock, onCreate, onMigrate, onRetry }) {
+function VaultUnlock({ appIcon, status, onUnlock, onCreate, onMigrate, onRetry }) {
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [localError, setLocalError] = useState('')

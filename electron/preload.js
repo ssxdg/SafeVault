@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 置顶需要等待主进程确认后的窗口状态，避免渲染层按钮先选中又被轮询状态覆盖。
   toggleAlwaysOnTop: (value) => ipcRenderer.invoke('window-toggle-top', value),
   getWindowState: () => ipcRenderer.invoke('get-window-state'),
+  getAppIcon: () => ipcRenderer.invoke('get-app-icon'),
+  setAppIcon: (iconId) => ipcRenderer.invoke('set-app-icon', iconId),
 
   // File operations
   inspectVault: () => ipcRenderer.invoke('vault-inspect'),

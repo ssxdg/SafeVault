@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import appIcon from '../images/icon.png'
 import fullscreenIcon from '../images/全屏.png'
 
 const IDLE_TIMEOUT_PRESETS = [5, 15, 30, 60]
 
 function TitleBar({
+  appIcon,
+  iconId = 4,
+  iconOptions = [],
+  onIconChange,
   theme = 'secure',
   themeOptions = [],
   onThemeChange,
@@ -17,6 +20,7 @@ function TitleBar({
   onWindowClose,
 }) {
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
+  const [isIconMenuOpen, setIsIconMenuOpen] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
   const [customIdleMinutes, setCustomIdleMinutes] = useState(() => String(idleTimeoutMinutes || 15))
@@ -118,7 +122,38 @@ function TitleBar({
   return (
     <div className="titlebar">
       <div className="titlebar-left">
-        <img src={appIcon} className="titlebar-icon" alt="icon" />
+        <div className="titlebar-icon-picker">
+          <button
+            type="button"
+            className="titlebar-icon-button"
+            onClick={() => setIsIconMenuOpen(value => !value)}
+            aria-label="切换应用图标"
+            aria-expanded={isIconMenuOpen}
+            title="切换应用图标"
+          >
+            <img src={appIcon} className="titlebar-icon" alt="" />
+          </button>
+          {isIconMenuOpen && (
+            <div className="titlebar-icon-menu" role="group" aria-label="选择应用图标">
+              {iconOptions.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`titlebar-icon-option${iconId === option.value ? ' active' : ''}`}
+                  onClick={() => {
+                    onIconChange?.(option.value)
+                    setIsIconMenuOpen(false)
+                  }}
+                  title={option.label}
+                  aria-label={option.label}
+                  aria-pressed={iconId === option.value}
+                >
+                  <img src={option.image} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="titlebar-title">密码保险箱 v{__APP_VERSION__}</span>
       </div>
       <div className="titlebar-controls">
