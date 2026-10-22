@@ -731,9 +731,9 @@ function App() {
 
   const requestImport = useCallback(() => {
     showPasswordPrompt({
-      title: '导入加密备份',
-      message: '请输入该备份文件的主密码。',
-      detail: '密码仅用于在本机验证并解密所选备份。',
+      title: '导入 JSON 备份',
+      message: '加密备份请输入备份密码；明文备份请输入当前密码库的主密码。',
+      detail: '程序会根据文件内容识别备份格式，并在本机验证密码。',
     }, handleImport)
   }, [handleImport, showPasswordPrompt])
 

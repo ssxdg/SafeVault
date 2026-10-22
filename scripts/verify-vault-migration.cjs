@@ -197,9 +197,10 @@ async function verifyEncryptedBackupAndDangerousPlaintextExport() {
     const encryptedBackup = path.join(directory, 'backup.safevault.json')
     const plaintextBackup = path.join(directory, 'dangerous-plaintext.json')
     let savePath = encryptedBackup
+    let openPath = encryptedBackup
     const dialogApi = {
       showSaveDialog: async () => ({ canceled: false, filePath: savePath }),
-      showOpenDialog: async () => ({ canceled: false, filePaths: [encryptedBackup] }),
+      showOpenDialog: async () => ({ canceled: false, filePaths: [openPath] }),
     }
     const manager = createFileManager({ dataFile, dialogApi })
     const created = await manager.createVault(PASSWORD)
@@ -231,6 +232,21 @@ async function verifyEncryptedBackupAndDangerousPlaintextExport() {
     assert.strictEqual((await manager.exportPlaintextVault(null, PASSWORD)).success, true)
     const plaintextRaw = await fs.readFile(plaintextBackup, 'utf8')
     assert.strictEqual(plaintextRaw.includes('Backup-Secret-789'), true)
+
+    openPath = plaintextBackup
+    const wrongPlaintextImport = await manager.importEncryptedVault(null, 'wrong-password')
+    assert.strictEqual(wrongPlaintextImport.success, false)
+    assert.match(wrongPlaintextImport.error, /密码库损坏或主密码错误/)
+    const importedPlaintext = await manager.importEncryptedVault(null, PASSWORD)
+    assert.strictEqual(importedPlaintext.success, true)
+    assert.strictEqual(importedPlaintext.data.tabs[0].accounts[0].password, 'Backup-Secret-789')
+
+    const invalidBackup = path.join(directory, 'invalid.json')
+    await fs.writeFile(invalidBackup, JSON.stringify({ unrelated: true }), 'utf8')
+    openPath = invalidBackup
+    const invalidImport = await manager.importEncryptedVault(null, PASSWORD)
+    assert.strictEqual(invalidImport.success, false)
+    assert.match(invalidImport.error, /备份格式无效/)
   })
 }
 

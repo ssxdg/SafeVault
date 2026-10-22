@@ -219,9 +219,22 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     if (canceled || !filePaths || filePaths.length === 0) return { success: false, cancelled: true }
     try {
       const raw = await fsApi.readFile(filePaths[0], 'utf8')
-      const envelope = JSON.parse(raw)
-      if (!isVaultEnvelope(envelope)) throw new Error('备份不是有效的 SafeVault 加密文件。')
-      return { success: true, data: normalizeData(await decryptVault(envelope, password)) }
+      const backup = JSON.parse(raw)
+      if (isVaultEnvelope(backup)) {
+        return { success: true, data: normalizeData(await decryptVault(backup, password)) }
+      }
+      if (backup?.format === ENCRYPTED_FORMAT) {
+        throw new Error('备份不是有效的 SafeVault 加密文件。')
+      }
+      if (!backup || typeof backup !== 'object' || Array.isArray(backup) || !Array.isArray(backup.tabs)) {
+        throw new Error('备份格式无效：请选择 SafeVault 导出的 JSON 文件。')
+      }
+
+      // 明文备份没有自带密码；验证当前密码库主密码后才允许将其读入应用。
+      const state = await inspectVault()
+      if (state.state !== 'locked') throw new Error(state.error || '当前密码库不是可验证的加密文件。')
+      await decryptVault(state.envelope, password)
+      return { success: true, data: normalizeData(backup) }
     } catch (error) {
       return { success: false, error: error.message }
     }
