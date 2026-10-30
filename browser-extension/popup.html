@@ -7,20 +7,44 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main>
-      <h1>SafeVault</h1>
-      <p id="status" role="status" aria-live="polite">正在检查当前页面...</p>
-      <div id="accounts"></div>
-      <form id="save-account-form">
-        <h2>新增当前网站账号</h2>
-        <label for="account-name">账户名称</label>
-        <input id="account-name" name="accountName" required maxlength="200" autocomplete="off" />
-        <label for="username">账号 / 用户名</label>
-        <input id="username" name="username" required maxlength="320" autocomplete="off" />
-        <label for="password">密码</label>
-        <input id="password" name="password" type="password" required maxlength="4096" autocomplete="new-password" />
-        <button type="submit">保存到默认标签</button>
-      </form>
+    <main class="popup-shell">
+      <header class="popup-header">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <div class="brand-copy">
+          <h1>SafeVault</h1>
+          <span>本地密码保险箱</span>
+        </div>
+      </header>
+
+      <section class="site-panel" aria-label="当前网站状态">
+        <span class="section-eyebrow">当前网站</span>
+        <strong id="current-site">正在读取...</strong>
+        <p id="status" role="status" aria-live="polite">正在检查当前页面...</p>
+      </section>
+
+      <section class="accounts-section" aria-labelledby="accounts-title">
+        <div class="section-heading">
+          <h2 id="accounts-title">可用账号</h2>
+          <span id="account-count">—</span>
+        </div>
+        <div id="accounts"></div>
+      </section>
+
+      <details class="save-section">
+        <summary>手动添加账号 <span aria-hidden="true">+</span></summary>
+        <div class="save-content">
+          <p>登录后也会提示保存；无法识别时可在此添加。</p>
+          <form id="save-account-form">
+            <label for="account-name">账户名称</label>
+            <input id="account-name" name="accountName" required maxlength="200" autocomplete="off" placeholder="例如：工作账号" />
+            <label for="username">账号 / 用户名</label>
+            <input id="username" name="username" required maxlength="320" autocomplete="off" placeholder="输入账号" />
+            <label for="password">密码</label>
+            <input id="password" name="password" type="password" required maxlength="4096" autocomplete="new-password" placeholder="输入密码" />
+            <button class="save-button" type="submit">保存到默认标签 <span aria-hidden="true">→</span></button>
+          </form>
+        </div>
+      </details>
     </main>
     <script src="popup.js"></script>
   </body>

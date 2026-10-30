@@ -9,6 +9,8 @@ function setFieldValue(field, value) {
 
 let detectedForms = []
 let refreshTimer = null
+let hasSubmittedLogin = false
+let isCheckingLogin = false
 
 function refreshDetectedForms() {
   detectedForms = globalThis.SafeVaultFieldDetector.detectLoginForms(document.querySelectorAll('input'))
@@ -19,7 +21,32 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => {
     refreshTimer = null
     refreshDetectedForms()
+    if (hasSubmittedLogin) void checkPendingLogin()
   }, 120)
+}
+
+async function checkPendingLogin() {
+  if (isCheckingLogin) return
+  isCheckingLogin = true
+  try {
+    refreshDetectedForms()
+    const hasLoginForm = detectedForms.some(form => form.passwordField || form.newPasswordFields.length > 0)
+    const hasChallengeField = Boolean(document.querySelector('input[autocomplete="one-time-code"]'))
+    const response = await chrome.runtime.sendMessage({ type: 'checkPendingLogin', hasLoginForm, hasChallengeField })
+    if (!response?.ok || !response.data?.pending) return
+    const { username } = response.data
+    // 页面跳转且登录表单消失只能说明“可能成功”，由用户确认后才写入保险箱。
+    if (!window.confirm(`检测到「${username}」可能已登录，是否保存到 SafeVault 默认标签？`)) {
+      await chrome.runtime.sendMessage({ type: 'discardPendingLogin' })
+      return
+    }
+    const saved = await chrome.runtime.sendMessage({ type: 'acceptPendingLogin' })
+    if (!saved?.ok) window.alert('账号未能保存，请打开 SafeVault 插件手动添加。')
+  } catch (error) {
+    console.warn('SafeVault 检查待保存账号失败：', error)
+  } finally {
+    isCheckingLogin = false
+  }
 }
 
 function fillCredential(credential) {
@@ -41,11 +68,12 @@ function containsLoginInput(node) {
 }
 
 const observer = new MutationObserver(mutations => {
-  if (mutations.some(mutation => [...mutation.addedNodes].some(containsLoginInput))) scheduleRefresh()
+  if (mutations.some(mutation => [...mutation.addedNodes, ...mutation.removedNodes].some(containsLoginInput))) scheduleRefresh()
 })
 
 refreshDetectedForms()
 observer.observe(document.documentElement, { childList: true, subtree: true })
+setTimeout(() => { void checkPendingLogin() }, 1200)
 
 window.addEventListener('pagehide', () => {
   observer.disconnect()
@@ -54,9 +82,23 @@ window.addEventListener('pagehide', () => {
 
 document.addEventListener('submit', event => {
   refreshDetectedForms()
-  const target = detectedForms.find(form => form.kind === 'password-change'
+  const target = detectedForms.find(form => (form.kind === 'password-change' || form.kind === 'login')
     && (form.formKey === event.target || form.newPasswordFields.some(field => event.target?.contains?.(field))))
   if (!target) return
+  if (target.kind === 'login') {
+    const username = target.usernameField?.value?.trim()
+    const password = target.passwordField?.value
+    if (!username || !password) return
+    hasSubmittedLogin = true
+    chrome.runtime.sendMessage({
+      type: 'loginSubmitted',
+      accountName: document.title?.trim().slice(0, 200) || location.hostname,
+      username,
+      password,
+    }).catch(error => console.warn('SafeVault 暂存登录账号失败：', error))
+    setTimeout(() => { void checkPendingLogin() }, 1500)
+    return
+  }
   const values = target.newPasswordFields.map(field => field.value).filter(Boolean)
   if (values.length === 0 || (values.length > 1 && values.some(value => value !== values[0]))) return
   if (!window.confirm('是否将新密码保存到 SafeVault？主程序必须保持解锁。')) return

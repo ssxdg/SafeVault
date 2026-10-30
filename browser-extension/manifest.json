@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "SafeVault 本地填充",
   "version": "4.2.0",
-  "description": "由用户主动触发，从本机 SafeVault 填充当前网站的登录表单。",
-  "permissions": ["activeTab", "nativeMessaging", "tabs"],
+  "description": "从本机 SafeVault 填充登录表单，并在登录后确认保存新账号。",
+  "permissions": ["activeTab", "nativeMessaging", "tabs", "storage"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
     "service_worker": "service-worker.js"

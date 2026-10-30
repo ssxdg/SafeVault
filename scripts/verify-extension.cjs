@@ -23,6 +23,7 @@ function verifyManifestAndSources() {
   const manifest = JSON.parse(read('manifest.json'))
   assert.strictEqual(manifest.manifest_version, 3)
   assert.strictEqual(manifest.permissions.includes('nativeMessaging'), true)
+  assert.strictEqual(manifest.permissions.includes('storage'), true)
   assert.strictEqual(manifest.host_permissions.includes('http://*/*'), true)
   assert.strictEqual(manifest.host_permissions.includes('https://*/*'), true)
   assert.strictEqual(manifest.background.service_worker, 'service-worker.js')
@@ -43,6 +44,59 @@ function verifyManifestAndSources() {
   assert.match(read('content-script.js'), /MutationObserver/)
   assert.match(read('content-script.js'), /disconnect\(\)/)
   assert.match(read('content-script.js'), /updateCredential/)
+  assert.match(read('content-script.js'), /loginSubmitted/)
+}
+
+async function verifyAutomaticLoginSave() {
+  const session = new Map()
+  const nativeRequests = []
+  let onMessage
+  const chrome = {
+    runtime: {
+      onMessage: { addListener: handler => { onMessage = handler } },
+      sendNativeMessage: (host, request, callback) => {
+        nativeRequests.push(request)
+        callback(request.action === 'listCredentials'
+          ? { ok: true, data: { credentials: [] } }
+          : { ok: true, data: { accountId: 'saved-account' } })
+      },
+    },
+    tabs: { onRemoved: { addListener() {} }, onUpdated: { addListener() {} } },
+    storage: { session: {
+      get: async key => key === null ? Object.fromEntries(session) : { [key]: session.get(key) },
+      set: async items => { for (const [key, value] of Object.entries(items)) session.set(key, value) },
+      remove: async key => { session.delete(key) },
+    } },
+  }
+  vm.runInNewContext(read('service-worker.js'), { chrome, URL, crypto: { randomUUID: () => 'test-request' } })
+  const dispatch = (message, url) => new Promise(resolve => {
+    onMessage(message, { url, tab: { id: 7, url }, frameId: 0 }, resolve)
+  })
+  const submitted = await dispatch({
+    type: 'loginSubmitted', accountName: 'Example', username: 'alice', password: 'secret',
+  }, 'https://example.com/login')
+  assert.strictEqual(submitted.ok, true)
+  assert.strictEqual(session.size, 1)
+
+  const samePage = await dispatch({ type: 'checkPendingLogin', hasLoginForm: false }, 'https://example.com/login')
+  assert.strictEqual(samePage.data.pending, false)
+  const stillLoggingIn = await dispatch({ type: 'checkPendingLogin', hasLoginForm: true }, 'https://example.com/dashboard')
+  assert.strictEqual(stillLoggingIn.data.pending, false)
+  const challenge = await dispatch({ type: 'checkPendingLogin', hasLoginForm: false, hasChallengeField: true }, 'https://example.com/verify')
+  assert.strictEqual(challenge.data.pending, false)
+
+  const candidate = await dispatch({ type: 'checkPendingLogin', hasLoginForm: false }, 'https://example.com/dashboard')
+  assert.strictEqual(candidate.data.pending, true)
+  assert.strictEqual(candidate.data.username, 'alice')
+  assert.strictEqual(Object.hasOwn(candidate.data, 'password'), false)
+  const saved = await dispatch({ type: 'acceptPendingLogin' }, 'https://example.com/dashboard')
+  assert.strictEqual(saved.ok, true)
+  assert.strictEqual(session.size, 0)
+  const create = nativeRequests.find(request => request.action === 'createCredential')
+  assert.strictEqual(create.origin, 'https://example.com')
+  assert.strictEqual(create.loginUrl, 'https://example.com/login')
+  assert.strictEqual(create.username, 'alice')
+  assert.strictEqual(create.password, 'secret')
 }
 
 function verifyFieldDetection() {
@@ -114,11 +168,12 @@ function verifyFieldDetection() {
 
 async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 服务启动超时，请手动打开主程序后重试。') {
   const statusElement = { textContent: '' }
-  const accountsElement = { replaceChildren() {} }
+  const accountsElement = { replaceChildren() {}, appendChild() {} }
   const saveForm = { addEventListener() {} }
   vm.runInNewContext(read('popup.js'), {
     document: {
       getElementById: id => id === 'status' ? statusElement : id === 'save-account-form' ? saveForm : accountsElement,
+      createElement: () => ({}),
     },
     chrome: {
       tabs: {
@@ -150,8 +205,9 @@ async function verifyPopupSave() {
   vm.runInNewContext(read('popup.js'), {
     document: {
       getElementById: id => id === 'status' ? statusElement
-        : id === 'accounts' ? { replaceChildren() {} }
-          : id === 'save-account-form' ? saveForm : fields[id],
+        : id === 'accounts' ? { replaceChildren() {}, appendChild() {} }
+          : id === 'save-account-form' ? saveForm : fields[id] || {},
+      createElement: () => ({}),
     },
     chrome: {
       tabs: {
@@ -183,6 +239,7 @@ async function main() {
   await verifyPopupTimeoutStatus('APP_UNAVAILABLE', 'SafeVault 桥接服务不可用，请重启主程序；若仍失败，请检查主程序与桥接组件版本。')
   await verifyPopupTimeoutStatus('NATIVE_HOST_ERROR', '无法启动 SafeVault 桥接组件，请检查扩展 ID、Native Host 注册和安装路径。')
   await verifyPopupSave()
+  await verifyAutomaticLoginSave()
   console.log('browser extension verification passed')
 }
 

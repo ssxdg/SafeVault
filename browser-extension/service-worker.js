@@ -1,5 +1,6 @@
 const NATIVE_HOST_NAME = 'com.safevault.bridge'
 const SELECTION_TTL_MS = 2 * 60 * 1000
+const PENDING_LOGIN_TTL_MS = 2 * 60 * 1000
 const selectedAccounts = new Map()
 
 function createRequest(action, origin, extra = {}) {
@@ -45,6 +46,19 @@ function clearTabSelections(tabId) {
   for (const key of selectedAccounts.keys()) {
     if (key.startsWith(`${tabId}:`)) selectedAccounts.delete(key)
   }
+}
+
+const pendingLoginKey = context => `pending-login:${context.tabId}:${context.frameId}`
+
+async function getPendingLogin(context) {
+  const key = pendingLoginKey(context)
+  const pending = (await chrome.storage.session.get(key))[key]
+  if (!pending) return null
+  if (pending.expiresAt <= Date.now()) {
+    await chrome.storage.session.remove(key)
+    return null
+  }
+  return pending
 }
 
 function sendNative(request) {
@@ -108,11 +122,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })).then(sendResponse)
     return true
   }
+  if (message?.type === 'loginSubmitted') {
+    const accountName = message.accountName?.trim()
+    const username = message.username?.trim()
+    const password = message.password
+    if (!accountName || accountName.length > 200 || !username || username.length > 320
+      || typeof password !== 'string' || !password || password.length > 4096) {
+      sendResponse({ ok: false, code: 'INVALID_REQUEST' })
+      return false
+    }
+    // 会话内存只暂存这次提交，浏览器关闭或超时后不能再用于新增账号。
+    chrome.storage.session.set({ [pendingLoginKey(context)]: {
+      origin: context.origin,
+      loginUrl: context.loginUrl,
+      accountName,
+      username,
+      password,
+      expiresAt: Date.now() + PENDING_LOGIN_TTL_MS,
+      prompted: false,
+    } }).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false, code: 'UPDATE_FAILED' }))
+    return true
+  }
+  if (message?.type === 'checkPendingLogin') {
+    getPendingLogin(context).then(async pending => {
+      if (!pending || pending.origin !== context.origin || pending.prompted
+        || context.loginUrl === pending.loginUrl || message.hasLoginForm !== false
+        || message.hasChallengeField === true
+        || /(?:^|\/)(?:otp|verify|verification|challenge|mfa|2fa)(?:\/|$)/i.test(new URL(context.loginUrl).pathname)) {
+        sendResponse({ ok: true, data: { pending: false } })
+        return
+      }
+      const listed = await sendNative(createRequest('listCredentials', context.origin))
+      if (!listed?.ok) {
+        sendResponse(listed)
+        return
+      }
+      if ((listed.data?.credentials || []).some(item => item.username?.trim().toLowerCase() === pending.username.toLowerCase())) {
+        await chrome.storage.session.remove(pendingLoginKey(context))
+        sendResponse({ ok: true, data: { pending: false } })
+        return
+      }
+      await chrome.storage.session.set({ [pendingLoginKey(context)]: { ...pending, prompted: true } })
+      sendResponse({ ok: true, data: { pending: true, accountName: pending.accountName, username: pending.username } })
+    }).catch(() => sendResponse({ ok: false, code: 'UPDATE_FAILED' }))
+    return true
+  }
+  if (message?.type === 'acceptPendingLogin' || message?.type === 'discardPendingLogin') {
+    getPendingLogin(context).then(async pending => {
+      const key = pendingLoginKey(context)
+      await chrome.storage.session.remove(key)
+      if (!pending || pending.origin !== context.origin || !pending.prompted) {
+        sendResponse({ ok: false, code: 'SELECTION_EXPIRED' })
+        return
+      }
+      if (message.type === 'discardPendingLogin') {
+        sendResponse({ ok: true })
+        return
+      }
+      sendResponse(await sendNative(createRequest('createCredential', pending.origin, {
+        loginUrl: pending.loginUrl,
+        accountName: pending.accountName,
+        username: pending.username,
+        password: pending.password,
+      })))
+    }).catch(() => sendResponse({ ok: false, code: 'UPDATE_FAILED' }))
+    return true
+  }
   sendResponse({ ok: false, code: 'UNKNOWN_MESSAGE' })
   return false
 })
 
-chrome.tabs.onRemoved.addListener(clearTabSelections)
+chrome.tabs.onRemoved.addListener(tabId => {
+  clearTabSelections(tabId)
+  // 删除标签页时清除所有框架暂存的登录信息。
+  chrome.storage.session.get(null).then(items => Promise.all(
+    Object.keys(items).filter(key => key.startsWith(`pending-login:${tabId}:`))
+      .map(key => chrome.storage.session.remove(key))
+  )).catch(error => console.warn('SafeVault 清理待保存账号失败：', error))
+})
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.url) clearTabSelections(tabId)
 })
