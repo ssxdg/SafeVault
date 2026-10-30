@@ -143,7 +143,7 @@ const defaultData = {
   schemaVersion: 3,
   theme: 'secure',
   tabs: [
-    { id: 'default-tab', name: 'Default', accounts: [], urls: [] },
+    { id: 'default-tab', name: '默认', accounts: [], urls: [] },
   ],
   notepads: [
     { id: 'default-note', name: 'Untitled', content: EMPTY_DELTA, createdAt: '', updatedAt: '' },
@@ -153,12 +153,17 @@ const defaultData = {
 
 function normalizeTabs(tabs, migrateLegacyLoginUrl) {
   const sourceTabs = Array.isArray(tabs) && tabs.length > 0 ? tabs : defaultData.tabs
-  return sourceTabs.map((tab, index) => ({
+  const normalizedTabs = sourceTabs.map((tab, index) => ({
     id: tab.id || `tab-${Date.now()}-${index}`,
-    name: tab.name || `Tab ${index + 1}`,
+    name: tab.id === 'default-tab' ? '默认' : (tab.name || `Tab ${index + 1}`),
     accounts: normalizeAccounts(tab.accounts, migrateLegacyLoginUrl),
     urls: normalizeCollectionItems(tab.urls, 'url'),
   }))
+  // 旧保险箱没有默认页签时补齐，插件写入始终有稳定的落点。
+  if (!normalizedTabs.some(tab => tab.id === 'default-tab')) {
+    normalizedTabs.push({ id: 'default-tab', name: '默认', accounts: [], urls: [] })
+  }
+  return normalizedTabs
 }
 
 function normalizeNotepads(data) {

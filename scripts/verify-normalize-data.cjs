@@ -30,6 +30,8 @@ const input = {
 const normalized = normalizeData(input)
 
 assert.strictEqual(normalized.schemaVersion, 3)
+assert.strictEqual(normalized.tabs[0].id, 'tab-1')
+assert.deepStrictEqual(normalized.tabs.at(-1), { id: 'default-tab', name: '默认', accounts: [], urls: [] })
 assert.strictEqual(normalized.theme, 'compact')
 assert.deepStrictEqual(
   normalized.tabs[0].accounts.map(item => item.id),

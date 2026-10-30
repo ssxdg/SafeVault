@@ -80,5 +80,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
     return true
   }
+  if (message?.type === 'saveCredential') {
+    chrome.runtime.sendMessage({
+      type: 'saveCredential',
+      accountName: message.accountName,
+      username: message.username,
+      password: message.password,
+    }, sendResponse)
+    return true
+  }
   return false
 })

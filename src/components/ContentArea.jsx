@@ -4,8 +4,22 @@ import AccountCard from './AccountCard'
 import UrlCard from './UrlCard'
 import Modal from './Modal'
 
+const getAccountSiteKey = account => {
+  const value = account.loginUrl?.trim()
+  if (!value) return `account:${account.id}`
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return `account:${account.id}`
+    // 仅合并同一登录地址；不同路径仍是不同入口，避免把同域下的不同系统混为一张卡片。
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}${url.search}${url.hash}`
+  } catch {
+    return `account:${account.id}`
+  }
+}
+
 function ContentArea({
   tab,
+  tabs,
   viewMode = 'card',
   onViewModeChange,
   onAddAccount, onUpdateAccount, onDeleteAccount,
@@ -60,9 +74,22 @@ function ContentArea({
       a.accountName?.toLowerCase().includes(q) ||
       a.username?.toLowerCase().includes(q) ||
       a.email?.toLowerCase().includes(q) ||
+      a.loginUrl?.toLowerCase().includes(q) ||
       a.note?.toLowerCase().includes(q)
     )
     .sort(sortByStableOrder(sortOrderRef.current.accountIds))
+
+  const accountGroups = []
+  const accountGroupsBySite = new Map()
+  for (const account of filteredAccounts) {
+    const siteKey = getAccountSiteKey(account)
+    if (!accountGroupsBySite.has(siteKey)) {
+      const group = []
+      accountGroupsBySite.set(siteKey, group)
+      accountGroups.push(group)
+    }
+    accountGroupsBySite.get(siteKey).push(account)
+  }
 
   const filteredUrls = (tab.urls || [])
     .filter(u =>
@@ -73,10 +100,10 @@ function ContentArea({
     )
     .sort(sortByStableOrder(sortOrderRef.current.urlIds))
 
-  const handleModalSave = (formData) => {
+  const handleModalSave = (formData, targetTabId) => {
     if (modal.type === 'account') {
-      if (modal.mode === 'add') onAddAccount(formData)
-      else onUpdateAccount(modal.data.id, formData)
+      if (modal.mode === 'add') onAddAccount(formData, targetTabId)
+      else onUpdateAccount(modal.data.id, formData, targetTabId)
     } else {
       if (modal.mode === 'add') onAddUrl(formData)
       else onUpdateUrl(modal.data.id, formData)
@@ -198,7 +225,7 @@ function ContentArea({
     {
       title: '操作',
       key: 'actions',
-      width: 280,
+      width: 370,
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
@@ -234,6 +261,12 @@ function ContentArea({
           >
             编辑
           </Button>
+          {record.loginUrl && <Button type="link" size="small" onClick={() => setModal({
+            type: 'account', mode: 'add', data: {
+              accountName: record.accountName, loginUrl: record.loginUrl,
+              loginTargets: record.loginTargets,
+            },
+          })}>添加同站账号</Button>}
           <Button
             type="link"
             size="small"
@@ -419,14 +452,17 @@ function ContentArea({
                 <div className="section-title">账号密码</div>
                 {viewMode === 'card' ? (
                   <div className="card-grid">
-                    {filteredAccounts.map(acc => (
+                    {accountGroups.map(accounts => (
                       <AccountCard
-                        key={acc.id}
-                        account={acc}
-                        viewMode={viewMode}
-                        onEdit={() => setModal({ type: 'account', mode: 'edit', data: acc })}
-                        onDelete={() => onDeleteAccount(acc.id)}
-                        onIncrementUse={() => onIncrementAccountUse(acc.id)}
+                        key={getAccountSiteKey(accounts[0])}
+                        accounts={accounts}
+                        onEdit={acc => setModal({ type: 'account', mode: 'edit', data: acc })}
+                        onAddAnother={() => setModal({ type: 'account', mode: 'add', data: {
+                          accountName: accounts[0].accountName, loginUrl: accounts[0].loginUrl,
+                          loginTargets: accounts[0].loginTargets,
+                        } })}
+                        onDelete={acc => onDeleteAccount(acc.id)}
+                        onIncrementUse={acc => onIncrementAccountUse(acc.id)}
                         showStatus={showStatus}
                         onConfirm={onConfirm}
                       />
@@ -439,7 +475,7 @@ function ContentArea({
                     rowKey="id"
                     pagination={false}
                     size="small"
-                    scroll={{ x: 1000 }}
+                    scroll={{ x: 1100 }}
                     style={{ fontSize: '13px' }}
                   />
                 )}
@@ -480,7 +516,7 @@ function ContentArea({
       </div>
 
       {modal && (
-        <Modal modal={modal} onSave={handleModalSave} onClose={() => setModal(null)} />
+        <Modal modal={modal} tabs={tabs} currentTabId={tab.id} onSave={handleModalSave} onClose={() => setModal(null)} />
       )}
     </div>
   )

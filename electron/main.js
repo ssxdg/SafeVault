@@ -254,6 +254,28 @@ if (!gotTheLock) {
           }
           return { success: true }
         },
+        createCredential: async ({ origin, loginUrl, accountName, username, password }) => {
+          const currentData = await vaultSession.requireData()
+          const updatedData = structuredClone(currentData)
+          const defaultTab = updatedData.tabs.find(tab => tab.id === 'default-tab')
+          if (!defaultTab || normalizeWebsiteOrigin(loginUrl) !== origin) return { success: false }
+          const accountId = `account-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+          const now = new Date().toISOString()
+          const account = {
+            id: accountId, accountName, username, password, email: '', loginUrl, note: '',
+            loginTargets: [{ id: `${accountId}-website`, type: 'website', origin, enabled: true }],
+            useCount: 0, createdAt: now, updatedAt: now,
+          }
+          defaultTab.accounts = [account, ...(defaultTab.accounts || [])]
+          const result = await fileManager.writeEncryptedData(updatedData)
+          if (!result.success) return result
+          vaultSession.replaceData(result.data)
+          vaultSession.touch()
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('vault-credential-created', { account, tabId: defaultTab.id })
+          }
+          return { success: true, accountId }
+        },
       })
       writeBridgeConfig({
         ...bridgeServer,

@@ -33,6 +33,7 @@ function request(action, overrides = {}) {
 
 async function main() {
   const updates = []
+  const creations = []
   const first = createBridgeServer({
     userSid: 'S-1-5-21-test',
     isUnlocked: () => true,
@@ -40,6 +41,14 @@ async function main() {
     updateCredential: async update => {
       updates.push(update)
       return { success: true }
+    },
+    createCredential: async credential => {
+      creations.push(credential)
+      DATA.tabs[0].accounts.push({
+        id: 'account-2', ...credential,
+        loginTargets: [{ id: 'target-2', type: 'website', origin: credential.origin, enabled: true }],
+      })
+      return { success: true, accountId: 'account-2' }
     },
   })
   const second = createBridgeServer({ userSid: 'S-1-5-21-test', isUnlocked: () => true, getVaultData: async () => DATA })
@@ -61,6 +70,34 @@ async function main() {
   assert.strictEqual(listed.ok, true)
   assert.strictEqual(listed.data.credentials.length, 1)
   assert.strictEqual(Object.hasOwn(listed.data.credentials[0], 'password'), false)
+
+  const created = await first.handleMessage({
+    token: first.sessionToken,
+    request: request('createCredential', {
+      accountName: 'Example 2', username: 'bob', password: 'another-secret',
+      loginUrl: 'https://example.com/login',
+    }),
+  })
+  assert.deepStrictEqual(created.data, { accountId: 'account-2' })
+  assert.strictEqual(creations.length, 1)
+  const listedAgain = await first.handleMessage({ token: first.sessionToken, request: request('listCredentials') })
+  assert.strictEqual(listedAgain.data.credentials.length, 2)
+  const duplicate = await first.handleMessage({
+    token: first.sessionToken,
+    request: request('createCredential', {
+      accountName: 'Duplicate', username: 'alice', password: 'secret',
+      loginUrl: 'https://example.com/login',
+    }),
+  })
+  assert.strictEqual(duplicate.code, 'ALREADY_EXISTS')
+  const foreignUrl = await first.handleMessage({
+    token: first.sessionToken,
+    request: request('createCredential', {
+      accountName: 'Wrong site', username: 'charlie', password: 'secret',
+      loginUrl: 'https://example.com.evil.test/login',
+    }),
+  })
+  assert.strictEqual(foreignUrl.code, 'INVALID_REQUEST')
 
   const credential = await first.handleMessage({
     token: first.sessionToken,

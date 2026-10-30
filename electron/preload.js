@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('vault-credential-updated', listener)
     return () => ipcRenderer.removeListener('vault-credential-updated', listener)
   },
+  onVaultCredentialCreated: (callback) => {
+    const listener = (event, created) => callback(created)
+    ipcRenderer.on('vault-credential-created', listener)
+    return () => ipcRenderer.removeListener('vault-credential-created', listener)
+  },
   writeVaultData: (data) => ipcRenderer.invoke('vault-write-data', data),
   copySecret: (value, ttlMs = 30_000) => ipcRenderer.invoke('vault-copy-secret', value, ttlMs),
   normalizeWebsiteTarget: (value) => ipcRenderer.invoke('login-target-normalize-website', value),

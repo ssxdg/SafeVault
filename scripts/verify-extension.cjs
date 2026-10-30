@@ -115,9 +115,10 @@ function verifyFieldDetection() {
 async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 服务启动超时，请手动打开主程序后重试。') {
   const statusElement = { textContent: '' }
   const accountsElement = { replaceChildren() {} }
+  const saveForm = { addEventListener() {} }
   vm.runInNewContext(read('popup.js'), {
     document: {
-      getElementById: id => id === 'status' ? statusElement : accountsElement,
+      getElementById: id => id === 'status' ? statusElement : id === 'save-account-form' ? saveForm : accountsElement,
     },
     chrome: {
       tabs: {
@@ -130,12 +131,58 @@ async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 
   assert.strictEqual(statusElement.textContent, expected)
 }
 
+async function verifyPopupSave() {
+  let submitHandler
+  let savedMessage
+  let wasReset = false
+  const statusElement = { textContent: '' }
+  const button = { disabled: false }
+  const fields = {
+    'account-name': { value: 'Example' },
+    username: { value: 'bob' },
+    password: { value: 'another-secret' },
+  }
+  const saveForm = {
+    addEventListener: (type, handler) => { if (type === 'submit') submitHandler = handler },
+    querySelector: () => button,
+    reset: () => { wasReset = true },
+  }
+  vm.runInNewContext(read('popup.js'), {
+    document: {
+      getElementById: id => id === 'status' ? statusElement
+        : id === 'accounts' ? { replaceChildren() {} }
+          : id === 'save-account-form' ? saveForm : fields[id],
+    },
+    chrome: {
+      tabs: {
+        query: async () => [{ id: 1 }],
+        sendMessage: async (id, message) => {
+          if (message.type === 'saveCredential') {
+            savedMessage = message
+            return { ok: true }
+          }
+          return { ok: true, data: { credentials: [] } }
+        },
+      },
+    },
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  await submitHandler({ preventDefault() {} })
+  assert.strictEqual(savedMessage.accountName, 'Example')
+  assert.strictEqual(savedMessage.username, 'bob')
+  assert.strictEqual(savedMessage.password, 'another-secret')
+  assert.strictEqual(wasReset, true)
+  assert.strictEqual(button.disabled, false)
+  assert.strictEqual(statusElement.textContent, '已保存到默认标签。')
+}
+
 async function main() {
   verifyManifestAndSources()
   verifyFieldDetection()
   await verifyPopupTimeoutStatus()
   await verifyPopupTimeoutStatus('APP_UNAVAILABLE', 'SafeVault 桥接服务不可用，请重启主程序；若仍失败，请检查主程序与桥接组件版本。')
   await verifyPopupTimeoutStatus('NATIVE_HOST_ERROR', '无法启动 SafeVault 桥接组件，请检查扩展 ID、Native Host 注册和安装路径。')
+  await verifyPopupSave()
   console.log('browser extension verification passed')
 }
 

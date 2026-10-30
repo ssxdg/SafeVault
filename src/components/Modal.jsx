@@ -4,14 +4,14 @@ import LoginTargetEditor from './LoginTargetEditor'
 const ACCOUNT_DEFAULTS = { accountName: '', username: '', password: '', email: '', loginUrl: '', note: '', loginTargets: [] }
 const URL_DEFAULTS = { name: '', url: '', token: '', note: '' }
 
-function Modal({ modal, onSave, onClose }) {
+function Modal({ modal, tabs = [], currentTabId, onSave, onClose }) {
   const { type, mode, data } = modal
   const isEdit = mode === 'edit'
   const isAccount = type === 'account'
 
   const [form, setForm] = useState(() =>
     isAccount
-      ? { ...ACCOUNT_DEFAULTS, ...(isEdit ? data : {}) }
+      ? { ...ACCOUNT_DEFAULTS, ...data }
       : { ...URL_DEFAULTS, ...(isEdit ? data : {}) }
   )
   const initialFormRef = useRef(form)
@@ -19,6 +19,7 @@ function Modal({ modal, onSave, onClose }) {
   const syncRequestRef = useRef(0)
   const [websiteDraft, setWebsiteDraft] = useState('')
   const [loginUrlError, setLoginUrlError] = useState('')
+  const [targetTabId, setTargetTabId] = useState(currentTabId)
 
   const firstInputRef = useRef(null)
   useEffect(() => { firstInputRef.current?.focus() }, [])
@@ -57,7 +58,7 @@ function Modal({ modal, onSave, onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    onSave(isAccount ? await syncLoginTarget(form) : form)
+    onSave(isAccount ? await syncLoginTarget(form) : form, targetTabId)
   }
 
   const handleEscape = (event) => {
@@ -94,6 +95,12 @@ function Modal({ modal, onSave, onClose }) {
                   placeholder="如：Gmail、微信、支付宝"
                   required
                 />
+              </div>
+              <div className="form-group">
+                <label>保存到标签</label>
+                <select value={targetTabId} onChange={event => setTargetTabId(event.target.value)}>
+                  {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.name}</option>)}
+                </select>
               </div>
               <div className="form-group">
                 <label>账号 / 用户名</label>

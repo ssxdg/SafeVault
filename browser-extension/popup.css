@@ -32,6 +32,29 @@ h1 {
   gap: 8px;
 }
 
+#save-account-form {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #334155;
+}
+
+#save-account-form h2 { margin: 0 0 4px; font-size: 14px; }
+#save-account-form label { font-size: 12px; color: #cbd5e1; }
+#save-account-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #f8fafc;
+  background: #1e293b;
+}
+#save-account-form input:focus-visible { outline: 2px solid #38bdf8; }
+#save-account-form button { margin-top: 5px; text-align: center; }
+
 button {
   width: 100%;
   min-height: 40px;

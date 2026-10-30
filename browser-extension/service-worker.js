@@ -18,6 +18,7 @@ function getTrustedContext(sender) {
     if (!Number.isInteger(sender.tab?.id) || !Number.isInteger(sender.frameId)) return null
     return {
       origin: url.origin,
+      loginUrl: `${url.origin}${url.pathname}`,
       tabId: sender.tab.id,
       frameId: sender.frameId,
       key: `${sender.tab.id}:${sender.frameId}:${url.origin}`,
@@ -95,6 +96,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendNative(createRequest('updateCredential', context.origin, {
       accountId,
       newPassword: message.newPassword,
+    })).then(sendResponse)
+    return true
+  }
+  if (message?.type === 'saveCredential') {
+    sendNative(createRequest('createCredential', context.origin, {
+      loginUrl: context.loginUrl,
+      accountName: message.accountName,
+      username: message.username,
+      password: message.password,
     })).then(sendResponse)
     return true
   }

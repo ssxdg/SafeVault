@@ -763,6 +763,35 @@ body {
 .icon-btn:hover { background: var(--icon-hover-bg); color: var(--icon-hover-color); }
 .icon-btn.delete-btn:hover { background: var(--danger-bg); color: var(--danger); }
 
+.account-group-count { align-self: center; color: var(--text-muted); font-size: 11px; }
+.account-group-items .account-entry + .account-entry { border-top: 1px solid var(--border); }
+.account-group-items .card-header { padding: 8px 14px 4px; border-bottom: 0; }
+.account-group-items .card-body { padding: 0 14px 8px; }
+.account-action-copy-icon { width: 14px; height: 14px; object-fit: contain; }
+.account-group-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+}
+.account-group-url-link {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-group-url-link:hover { text-decoration: underline; }
+
 .card-body {
   padding: 10px 14px;
   display: flex;
@@ -851,6 +880,9 @@ body {
   border-radius: 12px;
   width: 440px;
   max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -891,11 +923,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 .form-group label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 
+.form-group select,
 .form-group input,
 .form-group textarea {
   height: 40px;
@@ -911,6 +946,7 @@ body {
 }
 .form-group textarea { height: auto; padding: 10px 12px; resize: vertical; min-height: 72px; }
 .form-group input:focus,
+.form-group select:focus,
 .form-group textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); background: var(--surface); }
 .form-group input::placeholder,
 .form-group textarea::placeholder { color: var(--input-placeholder); }

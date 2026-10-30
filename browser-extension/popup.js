@@ -1,5 +1,6 @@
 const statusElement = document.getElementById('status')
 const accountsElement = document.getElementById('accounts')
+const saveForm = document.getElementById('save-account-form')
 
 function statusText(code) {
   const messages = {
@@ -10,6 +11,9 @@ function statusText(code) {
     LOCKED: '密码库已锁定，请先在主程序中解锁。',
     UNTRUSTED_PAGE: '当前页面不支持填充。',
     FIELDS_NOT_FOUND: '未找到可填充的登录表单。',
+    ALREADY_EXISTS: '当前网站已有相同用户名，请在主程序中编辑该账号。',
+    INVALID_REQUEST: '账号信息无效，请检查输入。',
+    UPDATE_FAILED: '账号保存失败，请稍后重试。',
   }
   return messages[code] || '无法连接 SafeVault。'
 }
@@ -39,7 +43,7 @@ function renderAccounts(credentials) {
   credentials.forEach(credential => {
     const button = document.createElement('button')
     button.type = 'button'
-    button.textContent = credential.accountName || credential.username || '未命名账号'
+    button.textContent = `${credential.accountName || '未命名账号'} · ${credential.username || '无用户名'}${credential.tabName ? `（${credential.tabName}）` : ''}`
     button.addEventListener('click', async () => {
       button.disabled = true
       statusElement.textContent = '正在填充...'
@@ -57,4 +61,27 @@ sendToActiveTab({ type: 'requestCredentialList' }).then(response => {
     return
   }
   renderAccounts(response.data?.credentials || [])
+})
+
+saveForm.addEventListener('submit', async event => {
+  event.preventDefault()
+  const accountName = document.getElementById('account-name').value.trim()
+  const username = document.getElementById('username').value.trim()
+  const password = document.getElementById('password').value
+  if (!accountName || !username || !password) return
+  const button = saveForm.querySelector('button[type="submit"]')
+  button.disabled = true
+  statusElement.textContent = '正在保存账号...'
+  // 密码只通过当前标签页与本机桥接传递，不写入扩展存储。
+  const response = await sendToActiveTab({ type: 'saveCredential', accountName, username, password })
+  if (response?.ok) {
+    saveForm.reset()
+    statusElement.textContent = '已保存到默认标签。'
+    const listed = await sendToActiveTab({ type: 'requestCredentialList' })
+    if (listed?.ok) renderAccounts(listed.data?.credentials || [])
+    statusElement.textContent = '已保存到默认标签。'
+  } else {
+    statusElement.textContent = statusText(response?.code)
+  }
+  button.disabled = false
 })

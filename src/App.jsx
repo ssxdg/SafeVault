@@ -42,7 +42,7 @@ const getCustomThemeId = (theme) => (
 const createDefaultData = () => ({
   schemaVersion: 3,
   theme: 'secure',
-  tabs: [{ id: generateId(), name: '个人账户', accounts: [], urls: [] }],
+  tabs: [{ id: 'default-tab', name: '默认', accounts: [], urls: [] }],
   notepads: [{ id: generateId(), name: '未命名', content: '', createdAt: '', updatedAt: '' }],
   activeNotepadId: null,
 })
@@ -241,6 +241,25 @@ function App() {
     })
   }, [scheduleSave, showStatus])
 
+  useEffect(() => {
+    if (!window.electronAPI?.onVaultCredentialCreated) return undefined
+    return window.electronAPI.onVaultCredentialCreated(({ account, tabId }) => {
+      if (!account?.id || !latestDataRef.current) return
+      // 插件已在主进程落盘；合并到当前编辑快照，防止待执行的自动保存覆盖新账号。
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const updatedData = {
+        ...latestDataRef.current,
+        tabs: latestDataRef.current.tabs.map(tab => tab.id === tabId
+          ? { ...tab, accounts: [account, ...(tab.accounts || []).filter(item => item.id !== account.id)] }
+          : tab),
+      }
+      latestDataRef.current = updatedData
+      setData(updatedData)
+      scheduleSave(updatedData)
+      showStatus('浏览器插件新增账号已保存到默认标签')
+    })
+  }, [scheduleSave, showStatus])
+
   const handleWindowClose = useCallback(async () => {
     // 标题栏关闭和 ESC 都会隐藏到托盘；隐藏前先写入待保存数据，避免窗口隐藏后用户误以为内容已经保存。
     await flushScheduledSave()
@@ -381,6 +400,7 @@ function App() {
   }, [data, updateData])
 
   const deleteTab = useCallback((tabId) => {
+    if (tabId === 'default-tab') return
     if ((data.tabs || []).length <= 1) {
       // 内容区依赖至少一个账号/网址标签；阻止删除最后一个标签，避免进入空标签状态后触发渲染异常。
       showInfo({
@@ -400,6 +420,7 @@ function App() {
   }, [data, updateData, activeTabId, showInfo])
 
   const renameTab = useCallback((tabId, newName) => {
+    if (tabId === 'default-tab') return
     updateData({
       ...data,
       tabs: data.tabs.map(t => t.id === tabId ? { ...t, name: newName } : t),
@@ -504,16 +525,24 @@ function App() {
     })
   }, [data, updateData])
 
-  const updateAccount = useCallback((tabId, accId, account) => {
+  const updateAccount = useCallback((tabId, accId, account, targetTabId = tabId) => {
     const now = new Date().toISOString()
+    const existing = data.tabs.find(t => t.id === tabId)?.accounts.find(a => a.id === accId)
+    if (!existing || !data.tabs.some(t => t.id === targetTabId)) return
+    // 编辑时换页签只移动当前记录，保留使用次数及创建时间。
     updateData({
       ...data,
       tabs: data.tabs.map(t =>
-        t.id === tabId
-          ? { ...t, accounts: t.accounts.map(a => a.id === accId ? { ...a, ...account, updatedAt: now } : a) }
-          : t
+        t.id === tabId && tabId !== targetTabId
+          ? { ...t, accounts: t.accounts.filter(a => a.id !== accId) }
+          : t.id === targetTabId
+            ? { ...t, accounts: tabId === targetTabId
+              ? t.accounts.map(a => a.id === accId ? { ...a, ...account, updatedAt: now } : a)
+              : [{ ...existing, ...account, updatedAt: now }, ...t.accounts] }
+            : t
       ),
     })
+    if (tabId !== targetTabId) setActiveTabId(targetTabId)
   }, [data, updateData])
 
   const deleteAccount = useCallback((tabId, accId) => {
@@ -852,10 +881,11 @@ function App() {
         ) : (
           <ContentArea
             tab={activeTab}
+            tabs={data.tabs}
             viewMode={contentViewMode}
             onViewModeChange={setContentViewMode}
-            onAddAccount={(acc) => addAccount(activeTabId, acc)}
-            onUpdateAccount={(id, acc) => updateAccount(activeTabId, id, acc)}
+            onAddAccount={(acc, targetTabId) => { addAccount(targetTabId, acc); if (targetTabId !== activeTabId) setActiveTabId(targetTabId) }}
+            onUpdateAccount={(id, acc, targetTabId) => updateAccount(activeTabId, id, acc, targetTabId)}
             onDeleteAccount={(id) => deleteAccount(activeTabId, id)}
             onAddUrl={(url) => addUrl(activeTabId, url)}
             onUpdateUrl={(id, url) => updateUrl(activeTabId, id, url)}

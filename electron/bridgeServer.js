@@ -6,7 +6,7 @@ const path = require('path')
 const { execFileSync } = require('child_process')
 const { findCredentialsForOrigin, normalizeWebsiteOrigin } = require('./credentialMatcher')
 
-const ALLOWED_ACTIONS = new Set(['listCredentials', 'getCredential', 'reportFillResult', 'updateCredential'])
+const ALLOWED_ACTIONS = new Set(['listCredentials', 'getCredential', 'reportFillResult', 'updateCredential', 'createCredential'])
 const MAX_PIPE_MESSAGE_BYTES = 1024 * 1024
 
 function createError(requestId, code) {
@@ -27,6 +27,7 @@ function createBridgeServer({
   isUnlocked,
   getVaultData,
   updateCredential,
+  createCredential,
   requestTimeoutMs = 3_000,
   sessionToken = crypto.randomBytes(32).toString('base64url'),
 } = {}) {
@@ -60,6 +61,13 @@ function createBridgeServer({
       && (typeof request.newPassword !== 'string' || !request.newPassword || request.newPassword.length > 4096)) {
       return createError(requestId, 'INVALID_REQUEST')
     }
+    if (request.action === 'createCredential'
+      && (typeof request.accountName !== 'string' || !request.accountName.trim() || request.accountName.length > 200
+        || typeof request.username !== 'string' || !request.username.trim() || request.username.length > 320
+        || typeof request.password !== 'string' || !request.password || request.password.length > 4096
+        || typeof request.loginUrl !== 'string' || normalizeWebsiteOrigin(request.loginUrl) !== origin)) {
+      return createError(requestId, 'INVALID_REQUEST')
+    }
     if (!isUnlocked()) return createError(requestId, 'LOCKED')
 
     if (request.action === 'reportFillResult') {
@@ -68,6 +76,23 @@ function createBridgeServer({
 
     const data = await getVaultData()
     const summaries = findCredentialsForOrigin(data, origin)
+    if (request.action === 'createCredential') {
+      if (typeof createCredential !== 'function') return createError(requestId, 'UPDATE_UNAVAILABLE')
+      // 同站同用户名不重复建档；同一地址的其他用户名可以独立保存。
+      if (summaries.some(item => item.username.trim().toLowerCase() === request.username.trim().toLowerCase())) {
+        return createError(requestId, 'ALREADY_EXISTS')
+      }
+      const result = await createCredential({
+        origin,
+        loginUrl: request.loginUrl,
+        accountName: request.accountName.trim(),
+        username: request.username.trim(),
+        password: request.password,
+      })
+      return result?.success
+        ? { requestId, ok: true, code: 'OK', data: { accountId: result.accountId } }
+        : createError(requestId, 'UPDATE_FAILED')
+    }
     if (request.action === 'listCredentials') {
       return { requestId, ok: true, code: 'OK', data: { credentials: summaries } }
     }

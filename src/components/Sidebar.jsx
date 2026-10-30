@@ -25,6 +25,7 @@ function Sidebar({
 
   const handleDoubleClick = (e, tab) => {
     e.stopPropagation()
+    if (tab.id === 'default-tab') return
     setEditingId(tab.id)
     setEditingName(tab.name)
     setTimeout(() => renameInputRef.current?.select(), 0)
@@ -151,13 +152,13 @@ function Sidebar({
                 ) : (
                   <>
                     <span className="tab-name">{tab.name}</span>
-                    <button
+                    {tab.id !== 'default-tab' && <button
                       className="tab-delete-btn"
                       onClick={(e) => handleDelete(e, tab.id)}
                       title="删除标签"
                     >
                       ×
-                    </button>
+                    </button>}
                   </>
                 )}
               </div>
