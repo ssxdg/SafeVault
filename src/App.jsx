@@ -161,10 +161,10 @@ function App() {
     setDialog(null)
   }, [])
 
-  const confirmDialog = useCallback((value) => {
+  const confirmDialog = useCallback((value, selectedValue) => {
     const action = dialog?.onConfirm
     setDialog(null)
-    action?.(value)
+    action?.(value, selectedValue)
   }, [dialog])
 
   const writeDataNow = useCallback(async (targetData = latestDataRef.current) => {
@@ -640,7 +640,7 @@ function App() {
     }
   }, [data, flushScheduledSave, showInfo, showStatus])
 
-  const handleImport = useCallback(async (password) => {
+  const handleImport = useCallback(async (password, notepadMode) => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
     const currentData = latestDataRef.current || data
     await flushScheduledSave(currentData)
@@ -651,9 +651,9 @@ function App() {
       let addedAccounts = 0
       let addedUrls = 0
       let addedNotepads = 0
+      let overwrittenNotepads = 0
       let skippedAccounts = 0
       let skippedUrls = 0
-      let skippedNotepads = 0
       for (const tab of imported) {
         const found = existing.find(t => t.name === tab.name)
         if (found) {
@@ -694,21 +694,26 @@ function App() {
           existing.push(newTab)
         }
       }
-      const serializeContent = (c) => {
-        if (!c) return ''
-        if (typeof c === 'string') return c
-        try { return JSON.stringify(c) } catch { return '' }
-      }
       const existingNotepads = [...(currentData.notepads || [])]
-      const existingNotepadKeys = new Set(
-        existingNotepads.map(note => `${note.name?.trim().toLowerCase() || ''}\n${serializeContent(note.content)}`)
-      )
+      let activeNotepadId = currentData.activeNotepadId
       for (const note of (result.data.notepads || [])) {
         const name = note.name || `记事本 ${existingNotepads.length + 1}`
         const content = note.content || ''
-        const key = `${name.trim().toLowerCase()}\n${serializeContent(content)}`
-        if (existingNotepadKeys.has(key)) {
-          skippedNotepads++
+        const nameKey = name.trim().toLowerCase()
+        const matchingIndexes = existingNotepads.reduce((indexes, item, index) => {
+          if (item.name?.trim().toLowerCase() === nameKey) indexes.push(index)
+          return indexes
+        }, [])
+        if (notepadMode === 'overwrite' && matchingIndexes.length > 0) {
+          // 同名记事本保留首个标签的 ID 和位置，同时清理此前导入产生的同名副本。
+          const firstIndex = matchingIndexes[0]
+          const firstId = existingNotepads[firstIndex].id
+          if (matchingIndexes.some(index => existingNotepads[index].id === activeNotepadId)) activeNotepadId = firstId
+          existingNotepads[firstIndex] = { ...note, id: firstId, name, content }
+          for (let index = matchingIndexes.length - 1; index > 0; index--) {
+            existingNotepads.splice(matchingIndexes[index], 1)
+          }
+          overwrittenNotepads++
         } else {
           existingNotepads.push({
             ...note,
@@ -716,7 +721,6 @@ function App() {
             name,
             content,
           })
-          existingNotepadKeys.add(key)
           addedNotepads++
         }
       }
@@ -731,16 +735,17 @@ function App() {
         theme: canUseImportedTheme ? importedTheme : (currentData.theme || 'secure'),
         tabs: existing,
         notepads: existingNotepads,
-        activeNotepadId: currentData.activeNotepadId || existingNotepads[0]?.id || null,
+        activeNotepadId: existingNotepads.some(note => note.id === activeNotepadId)
+          ? activeNotepadId : existingNotepads[0]?.id || null,
       }
       latestDataRef.current = mergedData
       updateData(mergedData)
       const parts = [`新增 ${addedAccounts} 个账号，${addedUrls} 个网址，${addedNotepads} 个记事本`]
-      if (skippedAccounts > 0 || skippedUrls > 0 || skippedNotepads > 0) {
+      if (overwrittenNotepads > 0) parts.push(`覆盖 ${overwrittenNotepads} 个同名记事本`)
+      if (skippedAccounts > 0 || skippedUrls > 0) {
         const skipParts = []
         if (skippedAccounts > 0) skipParts.push(`${skippedAccounts} 个账号`)
         if (skippedUrls > 0) skipParts.push(`${skippedUrls} 个网址`)
-        if (skippedNotepads > 0) skipParts.push(`${skippedNotepads} 个记事本`)
         parts.push(`跳过 ${skipParts.join('、')}（已存在）`)
       }
       showInfo({
@@ -762,7 +767,13 @@ function App() {
     showPasswordPrompt({
       title: '导入 JSON 备份',
       message: '加密备份请输入备份密码；明文备份请输入当前密码库的主密码。',
-      detail: '程序会根据文件内容识别备份格式，并在本机验证密码。',
+      detail: '程序会根据文件内容识别备份格式，并在本机验证密码。覆盖会用备份内容替换同名记事本，并清理已有的同名副本。',
+      selectLabel: '同名记事本的处理方式',
+      selectDefault: 'overwrite',
+      selectOptions: [
+        { value: 'overwrite', label: '覆盖已有同名记事本（推荐）' },
+        { value: 'duplicate', label: '重复导入为新记事本' },
+      ],
     }, handleImport)
   }, [handleImport, showPasswordPrompt])
 

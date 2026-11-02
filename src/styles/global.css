@@ -1671,6 +1671,17 @@ body {
   background: var(--input-bg);
 }
 
+.app-dialog-select-label {
+  display: block;
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.app-dialog-select-label .app-dialog-input {
+  margin-top: 6px;
+}
+
 /* 密码库锁定页独立于业务数据渲染，锁定后页面中不保留账号和记事本组件。 */
 .vault-gate {
   min-height: 100vh;

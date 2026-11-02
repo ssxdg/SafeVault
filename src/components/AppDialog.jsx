@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react'
 
 function AppDialog({ dialog, onClose, onConfirm }) {
   const [inputValue, setInputValue] = useState('')
+  const [selectedValue, setSelectedValue] = useState('')
   useEffect(() => setInputValue(''), [dialog])
+  useEffect(() => setSelectedValue(dialog?.selectDefault || ''), [dialog])
   if (!dialog) return null
 
   const isConfirm = dialog.kind === 'confirm'
@@ -33,14 +35,26 @@ function AppDialog({ dialog, onClose, onConfirm }) {
           {dialog.message && <div className="app-dialog-message">{dialog.message}</div>}
           {dialog.detail && <div className="app-dialog-detail">{dialog.detail}</div>}
           {isPrompt && (
-            <input
-              className="app-dialog-input"
-              type={dialog.inputType || 'text'}
-              value={inputValue}
-              onChange={event => setInputValue(event.target.value)}
-              placeholder={dialog.placeholder || ''}
-              autoFocus
-            />
+            <>
+              <input
+                className="app-dialog-input"
+                type={dialog.inputType || 'text'}
+                value={inputValue}
+                onChange={event => setInputValue(event.target.value)}
+                placeholder={dialog.placeholder || ''}
+                autoFocus
+              />
+              {dialog.selectOptions && (
+                <label className="app-dialog-select-label">
+                  {dialog.selectLabel}
+                  <select className="app-dialog-input" value={selectedValue || dialog.selectDefault} onChange={event => setSelectedValue(event.target.value)}>
+                    {dialog.selectOptions.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </>
           )}
           <div className="app-dialog-actions">
             {(isConfirm || isPrompt) && (
@@ -50,7 +64,7 @@ function AppDialog({ dialog, onClose, onConfirm }) {
             )}
             <button
               className={`btn ${tone === 'error' || tone === 'warning' ? 'btn-danger' : 'btn-primary'}`}
-              onClick={isConfirm ? onConfirm : isPrompt ? () => onConfirm(inputValue) : onClose}
+              onClick={isConfirm ? onConfirm : isPrompt ? () => onConfirm(inputValue, selectedValue || dialog.selectDefault) : onClose}
               disabled={isPrompt && !inputValue}
             >
               {dialog.confirmText || '确定'}
