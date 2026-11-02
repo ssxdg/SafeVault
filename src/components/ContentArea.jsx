@@ -3,6 +3,7 @@ import { Table, Button, Space } from 'antd'
 import AccountCard from './AccountCard'
 import UrlCard from './UrlCard'
 import Modal from './Modal'
+import NotePreview from './NotePreview'
 
 const getAccountSiteKey = account => {
   const value = account.loginUrl?.trim()
@@ -90,6 +91,12 @@ function ContentArea({
     }
     accountGroupsBySite.get(siteKey).push(account)
   }
+  // 列表沿用卡片的站点分组，组内账号仍保持各自的复制、编辑和删除入口。
+  const accountGroupRows = accountGroups.map(accounts => ({
+    key: getAccountSiteKey(accounts[0]),
+    accounts,
+    primary: accounts[0],
+  }))
 
   const filteredUrls = (tab.urls || [])
     .filter(u =>
@@ -118,7 +125,7 @@ function ContentArea({
         ? await window.electronAPI.copySecret(text)
         : await navigator.clipboard.writeText(text).then(() => ({ success: true }))
       if (result?.success === false) throw new Error(result.error)
-      showStatus(`已复制${label}，30 秒后自动清理`)
+      showStatus(`已复制${label}`)
       onCopied?.()
     } catch {
       showStatus(`复制${label}失败`)
@@ -202,25 +209,11 @@ function ContentArea({
       render: (text) => text || '-'
     },
     {
-      title: '登录网址',
-      dataIndex: 'loginUrl',
-      key: 'loginUrl',
-      width: 200,
-      ellipsis: true,
-      render: (text, record) => text ? (
-        <a 
-          href="#" 
-          onClick={(e) => {
-            e.preventDefault()
-            openExternalUrl(text, () => onIncrementAccountUse(record.id))
-          }}
-          style={{ color: '#2563EB', textDecoration: 'none' }}
-          onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
-          onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
-        >
-          {text}
-        </a>
-      ) : '-'
+      title: '备注',
+      dataIndex: 'note',
+      key: 'note',
+      width: 240,
+      render: text => text ? <NotePreview note={text} /> : '-',
     },
     {
       title: '操作',
@@ -261,12 +254,6 @@ function ContentArea({
           >
             编辑
           </Button>
-          {record.loginUrl && <Button type="link" size="small" onClick={() => setModal({
-            type: 'account', mode: 'add', data: {
-              accountName: record.accountName, loginUrl: record.loginUrl,
-              loginTargets: record.loginTargets,
-            },
-          })}>添加同站账号</Button>}
           <Button
             type="link"
             size="small"
@@ -281,6 +268,49 @@ function ContentArea({
         </Space>
       )
     }
+  ]
+
+  const accountGroupColumns = [
+    {
+      title: '站点',
+      key: 'site',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => record.primary.accountName || '未命名账号',
+    },
+    {
+      title: '账号',
+      key: 'count',
+      width: 100,
+      render: (_, record) => `${record.accounts.length} 个账号`,
+    },
+    {
+      title: '登录网址',
+      key: 'url',
+      ellipsis: true,
+      render: (_, record) => record.primary.loginUrl ? (
+        <a href="#" onClick={event => {
+          event.preventDefault()
+          event.stopPropagation()
+          openExternalUrl(record.primary.loginUrl, () => onIncrementAccountUse(record.primary.id))
+        }}>{record.primary.loginUrl}</a>
+      ) : '-',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 130,
+      render: (_, record) => record.primary.loginUrl ? (
+        <Button type="link" size="small" onClick={event => {
+          event.stopPropagation()
+          setModal({ type: 'account', mode: 'add', data: {
+            accountName: record.primary.accountName,
+            loginUrl: record.primary.loginUrl,
+            loginTargets: record.primary.loginTargets,
+          } })
+        }}>添加同站账号</Button>
+      ) : '-',
+    },
   ]
 
   // 网址列表视图与账号列表视图保持同一套交互能力：打开、复制、编辑、删除和使用次数统计都可用。
@@ -326,9 +356,8 @@ function ContentArea({
       title: '备注',
       dataIndex: 'note',
       key: 'note',
-      width: 180,
-      ellipsis: true,
-      render: (text) => text || '-',
+      width: 240,
+      render: text => text ? <NotePreview note={text} /> : '-',
     },
     {
       title: '操作',
@@ -470,12 +499,24 @@ function ContentArea({
                   </div>
                 ) : (
                   <Table
-                    columns={accountColumns}
-                    dataSource={filteredAccounts}
-                    rowKey="id"
+                    columns={accountGroupColumns}
+                    dataSource={accountGroupRows}
                     pagination={false}
                     size="small"
-                    scroll={{ x: 1100 }}
+                    expandable={{
+                      expandRowByClick: true,
+                      expandedRowRender: record => (
+                        <Table
+                          columns={accountColumns}
+                          dataSource={record.accounts}
+                          rowKey="id"
+                          pagination={false}
+                          size="small"
+                          scroll={{ x: 1130 }}
+                        />
+                      ),
+                    }}
+                    scroll={{ x: 750 }}
                     style={{ fontSize: '13px' }}
                   />
                 )}
@@ -505,7 +546,7 @@ function ContentArea({
                     rowKey="id"
                     pagination={false}
                     size="small"
-                    scroll={{ x: 1100 }}
+                    scroll={{ x: 1160 }}
                     style={{ fontSize: '13px' }}
                   />
                 )}

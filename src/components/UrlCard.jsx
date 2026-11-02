@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
+import NotePreview from './NotePreview'
 
 function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus, onConfirm }) {
   const [showToken, setShowToken] = useState(false)
@@ -109,7 +110,7 @@ function UrlCard({ urlItem, onEdit, onDelete, onIncrementUse, showStatus, onConf
         {urlItem.note && (
           <div className="card-row note-row">
             <span className="row-label">备注</span>
-            <span className="row-value note-value">{urlItem.note}</span>
+            <span className="row-value note-value"><NotePreview note={urlItem.note} /></span>
           </div>
         )}
       </div>

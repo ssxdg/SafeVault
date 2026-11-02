@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import copyIcon from '../images/复制.png'
+import NotePreview from './NotePreview'
 
 function SingleAccountCard({ account, compact = false, groupName = '', onEdit, onAddAnother, onDelete, onIncrementUse, showStatus, onConfirm }) {
   const [showPassword, setShowPassword] = useState(false)
@@ -11,7 +12,7 @@ function SingleAccountCard({ account, compact = false, groupName = '', onEdit, o
         ? await window.electronAPI.copySecret(text)
         : await navigator.clipboard.writeText(text).then(() => ({ success: true }))
       if (result?.success === false) throw new Error(result.error)
-      showStatus(`已复制${label}，30 秒后自动清理`)
+      showStatus(`已复制${label}`)
       onIncrementUse?.()
     } catch {
       showStatus(`复制${label}失败`)
@@ -153,7 +154,7 @@ function SingleAccountCard({ account, compact = false, groupName = '', onEdit, o
         {account.note && (
           <div className="card-row note-row">
             <span className="row-label">备注</span>
-            <span className="row-value note-value">{account.note}</span>
+            <span className="row-value note-value"><NotePreview note={account.note} /></span>
           </div>
         )}
       </div>
@@ -181,7 +182,7 @@ function AccountCard({ accounts, onEdit, onAddAnother, onDelete, onIncrementUse,
         ? await window.electronAPI.copySecret(primary.loginUrl)
         : await navigator.clipboard.writeText(primary.loginUrl).then(() => ({ success: true }))
       if (result?.success === false) throw new Error(result.error)
-      showStatus('已复制网址，30 秒后自动清理')
+      showStatus('已复制网址')
       onIncrementUse(primary)
     } catch {
       showStatus('复制网址失败')
