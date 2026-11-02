@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 import NotesPad from './components/NotesPad'
 import BottomBar from './components/BottomBar'
+import CloudSyncPanel from './components/CloudSyncPanel'
 import AppDialog from './components/AppDialog'
 import VaultUnlock from './components/VaultUnlock'
 import BrowserExtensionSettings from './components/BrowserExtensionSettings'
@@ -68,6 +69,8 @@ function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
   const [isBrowserSettingsOpen, setIsBrowserSettingsOpen] = useState(false)
+  const [isCloudPanelOpen, setIsCloudPanelOpen] = useState(false)
+  const [cloudStatus, setCloudStatus] = useState({ state: 'disabled' })
   // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH : false
@@ -100,6 +103,11 @@ function App() {
     window.electronAPI.getAppIcon().then(value => {
       if (APP_ICON_OPTIONS.some(option => option.value === value)) setIconId(value)
     }).catch(error => console.error('读取应用图标设置失败：', error))
+  }, [])
+
+  useEffect(() => {
+    window.electronAPI?.getCloudStatus?.().then(setCloudStatus).catch(() => {})
+    return window.electronAPI?.onCloudStatusChanged?.(setCloudStatus)
   }, [])
 
   useEffect(() => {
@@ -817,14 +825,18 @@ function App() {
 
   if (vaultStatus.state !== 'unlocked') {
     return (
-      <VaultUnlock
-        appIcon={selectedIcon}
-        status={vaultStatus}
-        onUnlock={unlockVault}
-        onCreate={createVault}
-        onMigrate={migrateVault}
-        onRetry={inspectVault}
-      />
+      <>
+        <VaultUnlock
+          appIcon={selectedIcon}
+          status={vaultStatus}
+          onUnlock={unlockVault}
+          onCreate={createVault}
+          onMigrate={migrateVault}
+          onRetry={inspectVault}
+          onCloudRestore={() => setIsCloudPanelOpen(true)}
+        />
+        {isCloudPanelOpen && <CloudSyncPanel status={cloudStatus} hasLocalVault={vaultStatus.state !== 'create'} onClose={() => setIsCloudPanelOpen(false)} onStatusChange={setCloudStatus} />}
+      </>
     )
   }
 
@@ -910,12 +922,23 @@ function App() {
       </div>
       <BottomBar
         statusMsg={statusMsg}
+        cloudStatus={{ disabled: '未连接', connected: '已连接', synced: '已同步', pending: '待同步', syncing: '同步中', conflict: '有冲突', 'remote-newer': '云端有更新', 'auth-required': '需授权', 'initial-upload': '待首次上传' }[cloudStatus.state] || '待检查'}
+        onCloudSync={() => setIsCloudPanelOpen(true)}
         onExport={handleExport}
         onImport={requestImport}
         onPlaintextExport={handlePlaintextExport}
         onBrowserSettings={() => setIsBrowserSettingsOpen(true)}
       />
       <AppDialog dialog={dialog} onClose={closeDialog} onConfirm={confirmDialog} />
+      {isCloudPanelOpen && <CloudSyncPanel
+        status={cloudStatus}
+        onClose={() => setIsCloudPanelOpen(false)}
+        onStatusChange={setCloudStatus}
+        onBeforeRestore={async () => {
+          const result = await flushScheduledSave()
+          return result?.success !== false && !result?.protected
+        }}
+      />}
       {isBrowserSettingsOpen && (
         <BrowserExtensionSettings
           onClose={() => setIsBrowserSettingsOpen(false)}

@@ -14,6 +14,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
   const tempFile = `${dataFile}.tmp`
   const backupFile = `${dataFile}.pre-encryption-backup`
   let activePassword = null
+  let pendingWrite = Promise.resolve()
 
   const getDialog = () => dialogApi || require('electron').dialog
 
@@ -152,7 +153,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     }
   }
 
-  async function writeEncryptedData(data) {
+  async function performEncryptedWrite(data) {
     if (!activePassword) return { success: false, error: '密码库尚未解锁，不能写入数据。' }
 
     try {
@@ -170,6 +171,45 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     } catch (error) {
       return { success: false, error: error.message }
     }
+  }
+
+  function writeEncryptedData(data) {
+    // 本地自动保存和浏览器扩展可能同时写入，串行化以保护共用的 .tmp 文件。
+    return enqueueWrite(() => performEncryptedWrite(data))
+  }
+
+  function enqueueWrite(operation) {
+    const task = pendingWrite.then(operation)
+    pendingWrite = task.catch(() => {})
+    return task
+  }
+
+  async function readEncryptedEnvelope() {
+    await pendingWrite
+    const state = await inspectVault()
+    if (state.state !== 'locked') throw new Error(state.error || '本地加密密码库不可用。')
+    return state.envelope
+  }
+
+  function installEncryptedEnvelope(envelope, password) {
+    return enqueueWrite(() => performEncryptedInstall(envelope, password))
+  }
+
+  async function performEncryptedInstall(envelope, password) {
+    // 云端数据必须先通过格式校验和主密码解密，才允许替换本地文件。
+    const data = normalizeData(await decryptVault(envelope, password))
+    const state = await inspectVault()
+    if (state.state === 'corrupt' || state.state === 'plaintext') {
+      throw new Error('本地密码库需要先人工恢复，不能用云端数据覆盖。')
+    }
+    if (state.state === 'locked') {
+      const backupPath = `${dataFile}.before-cloud-${Date.now()}.bak`
+      await fsApi.copyFile(dataFile, backupPath)
+    }
+    await fsApi.writeFile(tempFile, JSON.stringify(envelope, null, 2), 'utf8')
+    await fsApi.rename(tempFile, dataFile)
+    activePassword = password
+    return data
   }
 
   async function readData() {
@@ -267,6 +307,8 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     lockVault,
     migratePlaintextVault,
     writeEncryptedData,
+    readEncryptedEnvelope,
+    installEncryptedEnvelope,
     readData,
     writeData: writeEncryptedData,
     exportEncryptedVault,
@@ -295,6 +337,8 @@ module.exports = {
   lockVault: (...args) => getDefaultManager().lockVault(...args),
   migratePlaintextVault: (...args) => getDefaultManager().migratePlaintextVault(...args),
   writeEncryptedData: (...args) => getDefaultManager().writeEncryptedData(...args),
+  readEncryptedEnvelope: (...args) => getDefaultManager().readEncryptedEnvelope(...args),
+  installEncryptedEnvelope: (...args) => getDefaultManager().installEncryptedEnvelope(...args),
   readData: (...args) => getDefaultManager().readData(...args),
   writeData: (...args) => getDefaultManager().writeData(...args),
   exportEncryptedVault: (...args) => getDefaultManager().exportEncryptedVault(...args),

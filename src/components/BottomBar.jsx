@@ -1,9 +1,12 @@
 import React from 'react'
 
-function BottomBar({ statusMsg, onExport, onImport, onPlaintextExport, onBrowserSettings }) {
+function BottomBar({ statusMsg, cloudStatus, onCloudSync, onExport, onImport, onPlaintextExport, onBrowserSettings }) {
   return (
     <div className="bottombar">
       <div className="bottombar-actions">
+        <button className="btn btn-secondary btn-sm" onClick={onCloudSync} title="连接 OneDrive 并同步加密密码库">
+          OneDrive：{cloudStatus}
+        </button>
         <button className="btn btn-secondary btn-sm" onClick={onBrowserSettings} title="配置 Chrome 和 Edge 扩展连接">
           扩展设置
         </button>

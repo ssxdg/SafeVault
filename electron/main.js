@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog, powerMonitor, clipboard, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog, powerMonitor, clipboard, globalShortcut, safeStorage } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
 const fileManager = require('./fileManager')
@@ -10,6 +10,7 @@ const { normalizeWebsiteOrigin, normalizeExecutablePath, findCredentialsForApp, 
 const { createBridgeServer, getCurrentUserSid, writeBridgeConfig } = require('./bridgeServer')
 const { createNativeHostManager } = require('./nativeHostManager')
 const { createAppSettingsManager } = require('./appSettingsManager')
+const { createOneDriveSync } = require('./oneDriveSync')
 
 const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
@@ -35,6 +36,7 @@ let clipboardManager
 let bridgeServer
 let nativeHostManager
 let appSettingsManager
+let cloudSync
 
 function getBridgeExecutablePath() {
   return isDev
@@ -228,6 +230,20 @@ if (!gotTheLock) {
         }
       },
     })
+    cloudSync = createOneDriveSync({
+      userDataPath: app.getPath('userData'),
+      safeStorage,
+      fileManager,
+      vaultSession,
+      openExternal: url => shell.openExternal(url),
+      onStatus: status => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('cloud-status-changed', status)
+      },
+      onDeviceCode: code => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('cloud-device-code', code)
+      },
+    })
+    await cloudSync.initialize()
     powerMonitor.on('lock-screen', () => {
       void vaultSession.lock('system')
     })
@@ -248,6 +264,7 @@ if (!gotTheLock) {
           const result = await fileManager.writeEncryptedData(updatedData)
           if (!result.success) return result
           vaultSession.replaceData(result.data)
+          cloudSync.markLocalChanged()
           vaultSession.touch()
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('vault-credential-updated', { accountId, newPassword, updatedAt: account.updatedAt })
@@ -270,6 +287,7 @@ if (!gotTheLock) {
           const result = await fileManager.writeEncryptedData(updatedData)
           if (!result.success) return result
           vaultSession.replaceData(result.data)
+          cloudSync.markLocalChanged()
           vaultSession.touch()
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('vault-credential-created', { account, tabId: defaultTab.id })
@@ -570,7 +588,9 @@ ipcMain.handle('vault-inspect', async () => {
   return result
 })
 ipcMain.handle('vault-unlock', async (event, password) => {
-  return await vaultSession.unlock(password)
+  const result = await vaultSession.unlock(password)
+  if (result.success) void cloudSync.sync()
+  return result
 })
 ipcMain.handle('vault-create', async (event, password) => {
   const result = await fileManager.createVault(password)
@@ -640,9 +660,24 @@ ipcMain.handle('vault-write-data', async (event, data) => {
     return { success: false, error: '密码库尚未解锁，不能写入数据。' }
   }
   const result = await fileManager.writeEncryptedData(data)
-  if (result.success) vaultSession.replaceData(result.data)
+  if (result.success) {
+    vaultSession.replaceData(result.data)
+    cloudSync.markLocalChanged()
+  }
   return result
 })
+ipcMain.handle('cloud-status', () => cloudSync.getStatus())
+ipcMain.handle('cloud-connect', async (event, clientId) => cloudSync.connect(clientId))
+ipcMain.handle('cloud-sync', async () => cloudSync.sync())
+ipcMain.handle('cloud-upload-local', async (event, force = false) => cloudSync.uploadLocal(force))
+ipcMain.handle('cloud-restore', async (event, password) => {
+  const result = await cloudSync.restoreRemote(password)
+  if (result.success && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('vault-cloud-restored', result.data)
+  }
+  return { ...result, data: undefined }
+})
+ipcMain.handle('cloud-disconnect', async () => cloudSync.disconnect())
 ipcMain.handle('vault-export-encrypted', async () => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await fileManager.exportEncryptedVault(mainWindow)

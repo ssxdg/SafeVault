@@ -19,6 +19,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   lockVault: (reason = 'manual') => ipcRenderer.invoke('vault-lock', reason),
   touchVault: () => ipcRenderer.invoke('vault-touch'),
   setVaultIdleTimeout: (minutes) => ipcRenderer.invoke('vault-set-idle-timeout', minutes),
+  getCloudStatus: () => ipcRenderer.invoke('cloud-status'),
+  connectOneDrive: (clientId) => ipcRenderer.invoke('cloud-connect', clientId),
+  syncOneDrive: () => ipcRenderer.invoke('cloud-sync'),
+  uploadLocalVault: (force = false) => ipcRenderer.invoke('cloud-upload-local', force),
+  restoreCloudVault: (password) => ipcRenderer.invoke('cloud-restore', password),
+  disconnectOneDrive: () => ipcRenderer.invoke('cloud-disconnect'),
+  onCloudStatusChanged: (callback) => {
+    const listener = (event, status) => callback(status)
+    ipcRenderer.on('cloud-status-changed', listener)
+    return () => ipcRenderer.removeListener('cloud-status-changed', listener)
+  },
+  onCloudDeviceCode: (callback) => {
+    const listener = (event, code) => callback(code)
+    ipcRenderer.on('cloud-device-code', listener)
+    return () => ipcRenderer.removeListener('cloud-device-code', listener)
+  },
+  onVaultCloudRestored: (callback) => {
+    const listener = (event, data) => callback(data)
+    ipcRenderer.on('vault-cloud-restored', listener)
+    return () => ipcRenderer.removeListener('vault-cloud-restored', listener)
+  },
   onVaultStatusChanged: (callback) => {
     const listener = (event, status) => callback(status)
     ipcRenderer.on('vault-status-changed', listener)

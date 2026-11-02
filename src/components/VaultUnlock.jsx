@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 
-function VaultUnlock({ appIcon, status, onUnlock, onCreate, onMigrate, onRetry }) {
+function VaultUnlock({ appIcon, status, onUnlock, onCreate, onMigrate, onRetry, onCloudRestore }) {
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [localError, setLocalError] = useState('')
@@ -93,6 +93,7 @@ function VaultUnlock({ appIcon, status, onUnlock, onCreate, onMigrate, onRetry }
         <button className="btn btn-primary vault-submit" type="submit" disabled={isSubmitting}>
           {isSubmitting ? '处理中...' : copy.action}
         </button>
+        {mode === 'create' && <button type="button" className="btn btn-secondary" disabled={isSubmitting} onClick={onCloudRestore}>从 OneDrive 恢复</button>}
       </form>
     </div>
   )

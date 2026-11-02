@@ -47,6 +47,11 @@ export function useVaultSession() {
     })
   }, [inspect])
 
+  useEffect(() => window.electronAPI?.onVaultCloudRestored?.(restoredData => {
+    setData(restoredData)
+    setStatus(previous => ({ ...previous, state: 'unlocked', reason: null, error: '' }))
+  }), [])
+
   const openVault = useCallback(async (method, password) => {
     try {
       const result = await method(password)
