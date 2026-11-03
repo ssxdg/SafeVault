@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog, powerMonitor, clipboard, globalShortcut } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog, powerMonitor, clipboard, globalShortcut, safeStorage } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
 const fileManager = require('./fileManager')
@@ -10,6 +10,7 @@ const { normalizeWebsiteOrigin, normalizeExecutablePath, findCredentialsForApp, 
 const { createBridgeServer, getCurrentUserSid, writeBridgeConfig } = require('./bridgeServer')
 const { createNativeHostManager } = require('./nativeHostManager')
 const { createAppSettingsManager } = require('./appSettingsManager')
+const { createGitSyncManager } = require('./gitSyncManager')
 
 const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
@@ -35,6 +36,7 @@ let clipboardManager
 let bridgeServer
 let nativeHostManager
 let appSettingsManager
+let gitSyncManager
 
 function getBridgeExecutablePath() {
   return isDev
@@ -202,6 +204,7 @@ if (!gotTheLock) {
   // 只有获得单实例锁的应用才启动
   app.whenReady().then(async () => {
     appSettingsManager = createAppSettingsManager()
+    gitSyncManager = createGitSyncManager({ userDataPath: app.getPath('userData'), safeStorage })
     const appSettings = appSettingsManager.readSettings()
     currentIconId = appSettings.iconId
     nativeHostManager = createNativeHostManager({
@@ -654,6 +657,32 @@ ipcMain.handle('vault-import-encrypted', async (event, password) => {
 ipcMain.handle('vault-export-plaintext', async (event, password) => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await fileManager.exportPlaintextVault(mainWindow, password)
+})
+ipcMain.handle('git-sync-settings', async () => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.getSettings()
+})
+ipcMain.handle('git-sync-save-settings', async (event, settings) => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.saveSettings(settings)
+})
+ipcMain.handle('git-sync-test-connection', async () => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.testConnection()
+})
+ipcMain.handle('git-sync-push', async () => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  const state = await fileManager.inspectVault()
+  if (state.state !== 'locked') return { success: false, error: state.error || '本地密码库不是有效的加密文件。' }
+  return await gitSyncManager.push(state.envelope)
+})
+ipcMain.handle('git-sync-pull', async (event, password) => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.pull(password)
+})
+ipcMain.handle('git-sync-confirm-pull', async (event, commit) => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.confirmPull(commit)
 })
 ipcMain.handle('native-host-status', async () => {
   return await nativeHostManager.getStatus()

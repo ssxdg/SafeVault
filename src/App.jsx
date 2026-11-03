@@ -7,6 +7,7 @@ import BottomBar from './components/BottomBar'
 import AppDialog from './components/AppDialog'
 import VaultUnlock from './components/VaultUnlock'
 import BrowserExtensionSettings from './components/BrowserExtensionSettings'
+import GitSyncSettings from './components/GitSyncSettings'
 import { useVaultSession } from './hooks/useVaultSession'
 import iconOne from './images/icon-1.png'
 import iconTwo from './images/icon-2.png'
@@ -68,6 +69,10 @@ function App() {
   const [statusMsg, setStatusMsg] = useState('')
   const [dialog, setDialog] = useState(null)
   const [isBrowserSettingsOpen, setIsBrowserSettingsOpen] = useState(false)
+  const [isGitSettingsOpen, setIsGitSettingsOpen] = useState(false)
+  const [gitSyncAction, setGitSyncAction] = useState(null)
+  const [gitSyncFeedback, setGitSyncFeedback] = useState(null)
+  const gitSyncInFlightRef = useRef(false)
   // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH : false
@@ -640,11 +645,11 @@ function App() {
     }
   }, [data, flushScheduledSave, showInfo, showStatus])
 
-  const handleImport = useCallback(async (password, notepadMode) => {
+  const handleImport = useCallback(async (password, notepadMode, importResult) => {
     if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
     const currentData = latestDataRef.current || data
     await flushScheduledSave(currentData)
-    const result = await window.electronAPI.importEncryptedVault(password)
+    const result = importResult || await window.electronAPI.importEncryptedVault(password)
     if (result.success) {
       const existing = [...currentData.tabs]
       const imported = result.data.tabs || []
@@ -740,6 +745,10 @@ function App() {
       }
       latestDataRef.current = mergedData
       updateData(mergedData)
+      if (importResult) {
+        const saved = await flushScheduledSave(mergedData)
+        if (saved?.success === false) return { success: false }
+      }
       const parts = [`新增 ${addedAccounts} 个账号，${addedUrls} 个网址，${addedNotepads} 个记事本`]
       if (overwrittenNotepads > 0) parts.push(`覆盖 ${overwrittenNotepads} 个同名记事本`)
       if (skippedAccounts > 0 || skippedUrls > 0) {
@@ -754,6 +763,7 @@ function App() {
         message: '导入成功！',
         detail: parts.join('\n'),
       })
+      return { success: true }
     } else if (!result.cancelled) {
       showInfo({
         type: 'error',
@@ -776,6 +786,90 @@ function App() {
       ],
     }, handleImport)
   }, [handleImport, showPasswordPrompt])
+
+  const handleGitPush = useCallback(async () => {
+    if (gitSyncInFlightRef.current) return
+    gitSyncInFlightRef.current = true
+    setGitSyncAction('push')
+    setGitSyncFeedback({ type: 'info', text: '正在保存本地数据...' })
+    try {
+      const saved = await flushScheduledSave(latestDataRef.current || data)
+      if (saved?.success === false) {
+        setGitSyncFeedback({ type: 'error', text: 'Git 导出未开始：本地数据保存失败。' })
+        return
+      }
+      setGitSyncFeedback({ type: 'info', text: '正在连接仓库并推送加密密码库...' })
+      const result = await window.electronAPI.pushGitVault()
+      setGitSyncFeedback(result.success
+        ? { type: 'success', text: result.unchanged ? 'Git 导出完成：远端已是最新版本。' : 'Git 导出成功：已推送加密密码库。' }
+        : { type: 'error', text: `Git 导出失败：${result.error}` })
+      showInfo(result.success
+        ? { type: 'success', title: 'Git 导出完成', message: result.unchanged ? '远端密码库已经是最新版本。' : '加密密码库已推送到仓库。' }
+        : { type: 'error', title: 'Git 导出失败', message: result.error })
+    } catch (error) {
+      setGitSyncFeedback({ type: 'error', text: `Git 导出失败：${error.message}` })
+      showInfo({ type: 'error', title: 'Git 导出失败', message: error.message })
+    } finally {
+      gitSyncInFlightRef.current = false
+      setGitSyncAction(null)
+    }
+  }, [data, flushScheduledSave, showInfo])
+
+  const handleGitPull = useCallback(() => {
+    showPasswordPrompt({
+      title: '从 Git 导入加密密码库',
+      message: '输入远端备份的主密码。导入会合并本地数据，请先确认当前修改已经保存。',
+      selectLabel: '同名记事本的处理方式',
+      selectDefault: 'overwrite',
+      selectOptions: [
+        { value: 'overwrite', label: '覆盖已有同名记事本' },
+        { value: 'duplicate', label: '重复导入为新记事本' },
+      ],
+    }, async (password, notepadMode) => {
+      if (gitSyncInFlightRef.current) return
+      gitSyncInFlightRef.current = true
+      setGitSyncAction('pull')
+      setGitSyncFeedback({ type: 'info', text: '正在保存本地数据...' })
+      try {
+        const saved = await flushScheduledSave(latestDataRef.current || data)
+        if (saved?.success === false) {
+          setGitSyncFeedback({ type: 'error', text: 'Git 导入未开始：本地数据保存失败。' })
+          return
+        }
+        setGitSyncFeedback({ type: 'info', text: '正在连接仓库并拉取加密密码库...' })
+        const result = await window.electronAPI.pullGitVault(password)
+        if (!result.success) {
+          setGitSyncFeedback({ type: 'error', text: `Git 导入失败：${result.error}` })
+          showInfo({ type: 'error', title: 'Git 导入失败', message: result.error })
+          return
+        }
+        if (result.unchanged) {
+          setGitSyncFeedback({ type: 'info', text: 'Git 导入完成：远端没有新版本。' })
+          showInfo({ type: 'info', title: 'Git 导入', message: '远端密码库没有新版本。' })
+          return
+        }
+        setGitSyncFeedback({ type: 'info', text: '正在合并并保存导入数据...' })
+        const imported = await handleImport(password, notepadMode, result)
+        if (imported?.success) {
+          const confirmed = await window.electronAPI.confirmGitPull(result.commit)
+          if (!confirmed.success) {
+            setGitSyncFeedback({ type: 'error', text: `数据已导入，但同步状态保存失败：${confirmed.error}` })
+            showInfo({ type: 'error', title: 'Git 同步状态保存失败', message: confirmed.error })
+          } else {
+            setGitSyncFeedback({ type: 'success', text: 'Git 导入成功：远端数据已合并并保存。' })
+          }
+        } else {
+          setGitSyncFeedback({ type: 'error', text: 'Git 导入失败：合并后的本地数据未能保存。' })
+        }
+      } catch (error) {
+        setGitSyncFeedback({ type: 'error', text: `Git 导入失败：${error.message}` })
+        showInfo({ type: 'error', title: 'Git 导入失败', message: error.message })
+      } finally {
+        gitSyncInFlightRef.current = false
+        setGitSyncAction(null)
+      }
+    })
+  }, [data, flushScheduledSave, handleImport, showInfo, showPasswordPrompt])
 
   const handlePlaintextExport = useCallback(() => {
     showPasswordPrompt({
@@ -914,6 +1008,11 @@ function App() {
         onImport={requestImport}
         onPlaintextExport={handlePlaintextExport}
         onBrowserSettings={() => setIsBrowserSettingsOpen(true)}
+        onGitSettings={() => { setGitSyncFeedback(null); setIsGitSettingsOpen(true) }}
+        onGitPush={handleGitPush}
+        onGitPull={handleGitPull}
+        gitSyncAction={gitSyncAction}
+        gitSyncFeedback={gitSyncFeedback}
       />
       <AppDialog dialog={dialog} onClose={closeDialog} onConfirm={confirmDialog} />
       {isBrowserSettingsOpen && (
@@ -922,6 +1021,13 @@ function App() {
           onAlert={showInfo}
         />
       )}
+      {isGitSettingsOpen && <GitSyncSettings
+        onClose={() => setIsGitSettingsOpen(false)}
+        onAlert={options => {
+          setGitSyncFeedback({ type: options.type, text: options.message })
+          showInfo(options)
+        }}
+      />}
     </div>
   )
 }

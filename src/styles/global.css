@@ -1071,26 +1071,51 @@ body {
 
 /* ===== Bottom Bar ===== */
 .bottombar {
-  height: 50px;
+  min-height: 50px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 8px 16px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.bottombar-actions { display: flex; gap: 8px; }
+.bottombar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .status-msg {
+  flex: 0 1 320px;
+  min-width: 0;
   font-size: 13px;
   color: var(--success);
   font-weight: 500;
   opacity: 0;
   transition: opacity 0.3s;
+  overflow-wrap: anywhere;
 }
 .status-msg.visible { opacity: 1; }
+.status-msg.error { color: var(--danger); }
+.status-msg.info { color: var(--text-secondary); }
+
+/* Git 操作沿用现有按钮，并在耗时连接期间直接显示状态。 */
+.git-action-button { min-width: 90px; }
+.git-settings-submit { min-width: 148px; }
+.git-action-button:disabled,
+.git-settings-submit:disabled { opacity: 0.78; cursor: wait; transform: none; }
+.git-loading-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: git-loading-spin 0.75s linear infinite;
+}
+@keyframes git-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .git-loading-spinner { animation: none; }
+}
 
 /* ===== Sidebar Notepad Entry ===== */
 .sidebar-notes-btn {
@@ -1961,6 +1986,18 @@ body {
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+.git-sync-message {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.git-sync-message.error { border-color: var(--danger); color: var(--danger); }
+.git-sync-message.success { border-color: var(--success); color: var(--success); }
 
 .extension-settings-actions .btn-danger {
   margin-right: auto;
