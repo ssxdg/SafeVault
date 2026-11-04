@@ -128,7 +128,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       accountName: message.accountName,
       username: message.username,
       password: message.password,
+      tabId: message.tabId,
     }, sendResponse)
+    return true
+  }
+  if (message?.type === 'requestTabs' || message?.type === 'renameTab') {
+    chrome.runtime.sendMessage(message.type === 'requestTabs' ? { type: 'listTabs' } : message, sendResponse)
     return true
   }
   return false

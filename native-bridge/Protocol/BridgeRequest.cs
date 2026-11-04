@@ -12,7 +12,9 @@ public sealed record BridgeRequest(
     [property: JsonPropertyName("accountName")] string? AccountName = null,
     [property: JsonPropertyName("username")] string? Username = null,
     [property: JsonPropertyName("password")] string? Password = null,
-    [property: JsonPropertyName("loginUrl")] string? LoginUrl = null)
+    [property: JsonPropertyName("loginUrl")] string? LoginUrl = null,
+    [property: JsonPropertyName("tabId")] string? TabId = null,
+    [property: JsonPropertyName("tabName")] string? TabName = null)
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -21,6 +23,8 @@ public sealed record BridgeRequest(
         "reportFillResult",
         "updateCredential",
         "createCredential",
+        "listTabs",
+        "renameTab",
     ];
 
     public void Validate()
@@ -38,6 +42,11 @@ public sealed record BridgeRequest(
             throw new InvalidDataException("reportFillResult 需要 success。");
         if (Action == "updateCredential" && (string.IsNullOrEmpty(NewPassword) || NewPassword.Length > 4096))
             throw new InvalidDataException("updateCredential 需要有效的 newPassword。");
+        if (Action == "renameTab" && (string.IsNullOrWhiteSpace(TabId) || TabId.Length > 128
+            || string.IsNullOrWhiteSpace(TabName) || TabName.Length > 100))
+            throw new InvalidDataException("renameTab 需要有效的标签 ID 和名称。");
+        if (Action == "createCredential" && TabId is { Length: > 128 })
+            throw new InvalidDataException("createCredential 的标签 ID 过长。");
         // 新建账号的登录地址必须与发起请求的网页同源，不能借当前页保存其他站点的填充规则。
         if (Action == "createCredential" && (string.IsNullOrWhiteSpace(AccountName) || AccountName.Length > 200
             || string.IsNullOrWhiteSpace(Username) || Username.Length > 320

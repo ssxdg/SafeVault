@@ -24,13 +24,13 @@ npm ci
 
 ## 2. 更新版本号
 
-发布新版本时，在项目根目录执行：
+从旧版本更新到 5.0.0 时，在项目根目录执行：
 
 ```powershell
-npm version patch --no-git-tag-version --ignore-scripts
+npm version 5.0.0 --no-git-tag-version --ignore-scripts
 ```
 
-该命令会同步更新 `package.json` 和 `package-lock.json`。本次版本为 `4.1.0`；标题栏版本由 `vite.config.mjs` 从 `package.json` 读取，无须单独修改。发布前还要同步 `README.md` 中的当前版本与产物示例。
+该命令会同步更新 `package.json` 和 `package-lock.json`。标题栏版本由 `vite.config.mjs` 从 `package.json` 读取，无须单独修改。发布前还要同步浏览器扩展版本和用户文档。
 
 ## 3. 验证并打包
 
@@ -43,8 +43,8 @@ npm run build
 
 打包完成后，在 `release/` 查找：
 
-- `密码保险箱 Setup 4.1.0.exe`：NSIS 安装版。
-- `密码保险箱 4.1.0.exe`：便携版。
+- `密码保险箱 Setup 5.0.0.exe`：NSIS 安装版。
+- `密码保险箱 5.0.0.exe`：便携版。
 
 安装包会包含 `browser-extension/` 和自包含的 `SafeVault.Bridge.exe`。浏览器扩展的加载与 ID 登记步骤见 [用户手册](SafeVault-User-Manual.md)。如需单独准备 Chrome 和 Edge 的扩展目录，可运行 `npm run package:extension`，输出位于 `release/browser-extension/`。
 

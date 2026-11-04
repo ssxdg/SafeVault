@@ -6,7 +6,7 @@ const path = require('path')
 const { execFileSync } = require('child_process')
 const { findCredentialsForOrigin, normalizeWebsiteOrigin } = require('./credentialMatcher')
 
-const ALLOWED_ACTIONS = new Set(['listCredentials', 'getCredential', 'reportFillResult', 'updateCredential', 'createCredential'])
+const ALLOWED_ACTIONS = new Set(['listCredentials', 'getCredential', 'reportFillResult', 'updateCredential', 'createCredential', 'listTabs', 'renameTab'])
 const MAX_PIPE_MESSAGE_BYTES = 1024 * 1024
 
 function createError(requestId, code) {
@@ -28,6 +28,7 @@ function createBridgeServer({
   getVaultData,
   updateCredential,
   createCredential,
+  renameTab,
   requestTimeoutMs = 3_000,
   sessionToken = crypto.randomBytes(32).toString('base64url'),
 } = {}) {
@@ -65,7 +66,13 @@ function createBridgeServer({
       && (typeof request.accountName !== 'string' || !request.accountName.trim() || request.accountName.length > 200
         || typeof request.username !== 'string' || !request.username.trim() || request.username.length > 320
         || typeof request.password !== 'string' || !request.password || request.password.length > 4096
-        || typeof request.loginUrl !== 'string' || normalizeWebsiteOrigin(request.loginUrl) !== origin)) {
+        || typeof request.loginUrl !== 'string' || normalizeWebsiteOrigin(request.loginUrl) !== origin
+        || (request.tabId != null && (typeof request.tabId !== 'string' || !request.tabId || request.tabId.length > 128)))) {
+      return createError(requestId, 'INVALID_REQUEST')
+    }
+    if (request.action === 'renameTab'
+      && (typeof request.tabId !== 'string' || !request.tabId || request.tabId === 'default-tab' || request.tabId.length > 128
+        || typeof request.tabName !== 'string' || !request.tabName.trim() || request.tabName.length > 100)) {
       return createError(requestId, 'INVALID_REQUEST')
     }
     if (!isUnlocked()) return createError(requestId, 'LOCKED')
@@ -75,6 +82,18 @@ function createBridgeServer({
     }
 
     const data = await getVaultData()
+    if (request.action === 'listTabs') {
+      // 仅返回标签 ID 与名称，不向插件暴露其他分类中的账号内容。
+      return { requestId, ok: true, code: 'OK', data: { tabs: data.tabs.map(tab => ({ id: tab.id, name: tab.name })) } }
+    }
+    if (request.action === 'renameTab') {
+      if (!data.tabs.some(tab => tab.id === request.tabId)) return createError(requestId, 'NOT_FOUND')
+      if (typeof renameTab !== 'function') return createError(requestId, 'UPDATE_UNAVAILABLE')
+      const result = await renameTab({ tabId: request.tabId, tabName: request.tabName.trim() })
+      return result?.success
+        ? { requestId, ok: true, code: 'OK', data: { tabId: request.tabId, tabName: request.tabName.trim() } }
+        : createError(requestId, 'UPDATE_FAILED')
+    }
     const summaries = findCredentialsForOrigin(data, origin)
     if (request.action === 'createCredential') {
       if (typeof createCredential !== 'function') return createError(requestId, 'UPDATE_UNAVAILABLE')
@@ -88,6 +107,7 @@ function createBridgeServer({
         accountName: request.accountName.trim(),
         username: request.username.trim(),
         password: request.password,
+        tabId: request.tabId || 'default-tab',
       })
       return result?.success
         ? { requestId, ok: true, code: 'OK', data: { accountId: result.accountId } }

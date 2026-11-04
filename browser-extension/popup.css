@@ -73,7 +73,7 @@ body {
 }
 
 button { font: inherit; cursor: pointer; }
-button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid #4a8a62; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #4a8a62; outline-offset: 2px; }
 button:disabled { cursor: wait; opacity: 0.65; }
 .account-item {
   display: flex;
@@ -122,7 +122,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .save-content p { margin: 12px 0 9px; color: #7a877c; font-size: 10px; line-height: 1.5; }
 #save-account-form { display: grid; gap: 7px; }
 #save-account-form label { margin-top: 4px; color: #536157; font-size: 11px; font-weight: 600; }
-#save-account-form input {
+#save-account-form input, #save-account-form select {
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
@@ -134,6 +134,15 @@ button:disabled { cursor: wait; opacity: 0.65; }
 }
 #save-account-form input::placeholder { color: #a1aaa2; }
 #save-account-form input:focus { border-color: #5b9770; }
+#save-account-form select:focus { border-color: #5b9770; }
+#save-account-form select:disabled { color: #7d8880; background: #f4f5f3; }
+#save-account-form .tab-status { margin: 0; color: #a64032; font-size: 11px; line-height: 1.5; }
+#save-account-form .tab-status:empty { display: none; }
+#save-account-form .tab-hint { margin: 0; }
+.tab-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.tab-item { padding: 5px 8px; border: 1px solid #d9e0d9; border-radius: 6px; background: #f7faf7; color: #315d44; font-size: 11px; }
+.tab-item[aria-current="true"] { border-color: #5b9770; background: #eaf4ec; }
+#save-account-form .tab-rename-input { width: 110px; min-height: 28px; padding: 4px 6px; font-size: 11px; }
 .save-button {
   display: flex;
   align-items: center;

@@ -170,9 +170,12 @@ async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 
   const statusElement = { textContent: '' }
   const accountsElement = { replaceChildren() {}, appendChild() {} }
   const saveForm = { addEventListener() {} }
+  const tabSelect = { value: '', addEventListener() {}, replaceChildren() {}, appendChild() {} }
+  const tabStatus = { textContent: '' }
   vm.runInNewContext(read('popup.js'), {
     document: {
-      getElementById: id => id === 'status' ? statusElement : id === 'save-account-form' ? saveForm : accountsElement,
+      getElementById: id => id === 'status' ? statusElement : id === 'save-account-form' ? saveForm
+        : id === 'account-tab' ? tabSelect : id === 'tab-status' ? tabStatus : accountsElement,
       createElement: () => ({}),
     },
     chrome: {
@@ -184,6 +187,7 @@ async function verifyPopupTimeoutStatus(code = 'TIMEOUT', expected = 'SafeVault 
   })
   await new Promise(resolve => setImmediate(resolve))
   assert.strictEqual(statusElement.textContent, expected)
+  assert.ok(tabStatus.textContent)
 }
 
 async function verifyPopupSave() {
@@ -192,6 +196,9 @@ async function verifyPopupSave() {
   let wasReset = false
   const statusElement = { textContent: '' }
   const button = { disabled: false }
+  const tabSelect = { value: 'tab-work', addEventListener() {}, replaceChildren() {}, appendChild() {} }
+  const tabStatus = { textContent: '' }
+  const tabList = { children: [], replaceChildren() { this.children = [] }, appendChild(item) { this.children.push(item) } }
   const fields = {
     'account-name': { value: 'Example' },
     username: { value: 'bob' },
@@ -206,8 +213,10 @@ async function verifyPopupSave() {
     document: {
       getElementById: id => id === 'status' ? statusElement
         : id === 'accounts' ? { replaceChildren() {}, appendChild() {} }
-          : id === 'save-account-form' ? saveForm : fields[id] || {},
-      createElement: () => ({}),
+          : id === 'save-account-form' ? saveForm
+            : id === 'account-tab' ? tabSelect : id === 'tab-status' ? tabStatus
+              : id === 'tab-list' ? tabList : fields[id] || {},
+      createElement: () => ({ addEventListener() {}, setAttribute() {} }),
     },
     chrome: {
       tabs: {
@@ -217,6 +226,9 @@ async function verifyPopupSave() {
             savedMessage = message
             return { ok: true }
           }
+          if (message.type === 'requestTabs') return { ok: true, data: { tabs: [
+            { id: 'default-tab', name: '默认标签' }, { id: 'tab-work', name: '工作' },
+          ] } }
           return { ok: true, data: { credentials: [] } }
         },
       },
@@ -227,9 +239,10 @@ async function verifyPopupSave() {
   assert.strictEqual(savedMessage.accountName, 'Example')
   assert.strictEqual(savedMessage.username, 'bob')
   assert.strictEqual(savedMessage.password, 'another-secret')
+  assert.strictEqual(savedMessage.tabId, 'tab-work')
   assert.strictEqual(wasReset, true)
   assert.strictEqual(button.disabled, false)
-  assert.strictEqual(statusElement.textContent, '已保存到默认标签。')
+  assert.strictEqual(statusElement.textContent, '已保存到「工作」。')
 }
 
 async function main() {

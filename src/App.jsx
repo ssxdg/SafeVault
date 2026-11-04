@@ -261,7 +261,24 @@ function App() {
       latestDataRef.current = updatedData
       setData(updatedData)
       scheduleSave(updatedData)
-      showStatus('浏览器插件新增账号已保存到默认标签')
+      showStatus('浏览器插件新增账号已保存')
+    })
+  }, [scheduleSave, showStatus])
+
+  useEffect(() => {
+    if (!window.electronAPI?.onVaultTabRenamed) return undefined
+    return window.electronAPI.onVaultTabRenamed(({ tabId, tabName }) => {
+      if (!tabId || !tabName || !latestDataRef.current) return
+      // 插件已将改名写入密码库，同步当前编辑快照以免自动保存覆盖新名称。
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const updatedData = {
+        ...latestDataRef.current,
+        tabs: latestDataRef.current.tabs.map(tab => tab.id === tabId ? { ...tab, name: tabName } : tab),
+      }
+      latestDataRef.current = updatedData
+      setData(updatedData)
+      scheduleSave(updatedData)
+      showStatus('浏览器插件已重命名标签')
     })
   }, [scheduleSave, showStatus])
 

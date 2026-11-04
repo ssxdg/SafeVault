@@ -119,6 +119,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       accountName: message.accountName,
       username: message.username,
       password: message.password,
+      tabId: message.tabId,
+    })).then(sendResponse)
+    return true
+  }
+  if (message?.type === 'listTabs') {
+    sendNative(createRequest('listTabs', context.origin)).then(sendResponse)
+    return true
+  }
+  if (message?.type === 'renameTab') {
+    sendNative(createRequest('renameTab', context.origin, {
+      tabId: message.tabId,
+      tabName: message.tabName,
     })).then(sendResponse)
     return true
   }

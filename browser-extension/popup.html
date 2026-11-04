@@ -41,7 +41,14 @@
             <input id="username" name="username" required maxlength="320" autocomplete="off" placeholder="输入账号" />
             <label for="password">密码</label>
             <input id="password" name="password" type="password" required maxlength="4096" autocomplete="new-password" placeholder="输入密码" />
-            <button class="save-button" type="submit">保存到默认标签 <span aria-hidden="true">→</span></button>
+            <label for="account-tab">保存到标签</label>
+            <select id="account-tab" name="tabId" required disabled>
+              <option value="">正在读取标签...</option>
+            </select>
+            <p id="tab-status" class="tab-status" role="status" aria-live="polite"></p>
+            <p class="tab-hint">双击已有标签名称可改名（默认标签除外）。</p>
+            <div id="tab-list" class="tab-list" aria-label="已有标签"></div>
+            <button class="save-button" type="submit">保存账号 <span aria-hidden="true">→</span></button>
           </form>
         </div>
       </details>

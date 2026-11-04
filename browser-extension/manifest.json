@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SafeVault 本地填充",
-  "version": "4.2.0",
+  "version": "5.0.0",
   "description": "从本机 SafeVault 填充登录表单，并在登录后确认保存新账号。",
   "permissions": ["activeTab", "nativeMessaging", "tabs", "storage"],
   "host_permissions": ["http://*/*", "https://*/*"],
