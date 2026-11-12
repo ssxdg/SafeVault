@@ -1,5 +1,6 @@
 const { randomUUID, createHash } = require('crypto')
 const { repairDuplicateIds } = require('./dataNormalizer')
+const Delta = require('quill-delta')
 
 // 规范化对象键和 Quill 相邻文本段；格式、嵌入对象仍属于正文的一部分。
 function canonical(value) {
@@ -35,6 +36,97 @@ function businessFields(item) {
 
 function sameItem(left, right) {
   return contentEqual(businessFields(left), businessFields(right))
+}
+
+// 在共同基线上比较富文本操作；不同位置的修改可组合，同位置不同正文/格式才交给用户。
+function mergeNoteContent(base, local, remote) {
+  if (![base, local, remote].every(content => Array.isArray(content?.ops))) return null
+  try {
+    const origin = new Delta(base.ops)
+    const plainText = base.ops.map(op => typeof op.insert === 'string' ? op.insert : '\uFFFC').join('')
+    const blockFormats = ['header', 'list', 'blockquote', 'code-block', 'table']
+    const localChange = origin.diff(new Delta(local.ops))
+    const remoteChange = origin.diff(new Delta(remote.ops))
+    const ranges = change => {
+      let offset = 0
+      const result = []
+      for (const op of change.ops) {
+        if (op.insert !== undefined) result.push({ start: offset, end: offset, kind: 'insert', op })
+        else if (typeof op.delete === 'number') {
+          result.push({ start: offset, end: offset + op.delete, kind: 'delete', op })
+          offset += op.delete
+        } else if (typeof op.retain === 'number') {
+          if (op.attributes) {
+            const restrictive = Boolean(op.attributes['code-block'])
+            // 代码块作用于整行，可能移除该行的图片或行内格式，范围必须覆盖整段而非只有换行符。
+            const start = restrictive ? (offset === 0 ? 0 : plainText.lastIndexOf('\n', offset - 1) + 1) : offset
+            const lineEnd = restrictive ? plainText.indexOf('\n', offset + op.retain - 1) : -1
+            const end = restrictive ? (lineEnd < 0 ? plainText.length : lineEnd + 1) : offset + op.retain
+            result.push({ start, end, kind: 'format', restrictive, op })
+          }
+          offset += op.retain
+        } else return null
+      }
+      return result
+    }
+    const localRanges = ranges(localChange)
+    const remoteRanges = ranges(remoteChange)
+    if (!localRanges || !remoteRanges) return null
+    const sharedInserts = new Set()
+    for (const l of localRanges) {
+      for (const r of remoteRanges) {
+        if (l.kind === 'insert' && r.kind === 'insert') {
+          if (l.start !== r.start) continue
+          if (!contentEqual(l.op, r.op)) return null
+          sharedInserts.add(r.op)
+          continue
+        }
+        const overlaps = l.kind === 'insert' ? (r.restrictive ? l.start >= r.start : l.start > r.start) && l.start < r.end
+          : r.kind === 'insert' ? (l.restrictive ? r.start >= l.start : r.start > l.start) && r.start < l.end
+            : Math.max(l.start, r.start) < Math.min(l.end, r.end)
+        if (!overlaps) continue
+        if (l.kind === 'format' && r.kind === 'format') {
+          if (l.restrictive || r.restrictive) {
+            if (contentEqual(l.op, r.op)) continue
+            return null
+          }
+          // 标题、列表、引用、表格等主段落格式互斥；Quill 会在显示时丢弃其中一种。
+          const localBlock = blockFormats.find(key => l.op.attributes[key])
+          const remoteBlock = blockFormats.find(key => r.op.attributes[key])
+          if (localBlock && remoteBlock && localBlock !== remoteBlock) return null
+          const clashes = Object.keys(l.op.attributes).some(key => Object.hasOwn(r.op.attributes, key)
+            && !contentEqual(l.op.attributes[key], r.op.attributes[key]))
+          if (!clashes) continue
+        }
+        if (l.kind === 'delete' && r.kind === 'delete' && l.start === r.start && l.end === r.end) continue
+        return null
+      }
+    }
+    // 同一新增片段双方都已有时只保留一份，其余远端操作转换到本地修改后的坐标。
+    const remainingRemote = new Delta(remoteChange.ops.filter(op => !sharedInserts.has(op)))
+    const merged = origin.compose(localChange).compose(localChange.transform(remainingRemote, true))
+    // 插入或删除换行也会改变段落归属，最终检查必须覆盖这类不带格式 retain 的结构变化。
+    const lineAttributes = new Set([...blockFormats, 'align', 'direction', 'indent'])
+    let unsupportedInCode = false
+    for (const op of merged.ops) {
+      if (typeof op.insert !== 'string') { unsupportedInCode = true; continue }
+      const parts = op.insert.split('\n')
+      for (let index = 0; index < parts.length; index++) {
+        if (parts[index].length && Object.entries(op.attributes || {}).some(([key, value]) =>
+          !lineAttributes.has(key) && value !== null && value !== false
+        )) unsupportedInCode = true
+        if (index === parts.length - 1) continue
+        const attributes = op.attributes || {}
+        if (blockFormats.filter(key => attributes[key]).length > 1) return null
+        if (attributes['code-block'] && unsupportedInCode) return null
+        unsupportedInCode = false
+      }
+    }
+    return { ops: merged.ops }
+  } catch {
+    // 无法安全比较的旧格式或嵌入对象按冲突处理，保留两个原始版本供选择。
+    return null
+  }
 }
 
 const itemKey = item => `${item.type}:${item.id}`
@@ -118,16 +210,17 @@ function mergeVaultData(local, remote, base = null, resolutions = {}) {
         if (!survivor || (b ? sameItem(survivor, b) : tombstone.hash === fingerprint(survivor))) value = null
         else conflict = true
       } else stats.added++
-    } else if (l.type === 'note' && !contentEqual(l.content, r.content)) {
-      // 用户要求同名正文有差异必须确认，禁止以时间或单边变化为由静默覆盖。
-      conflict = true
     } else if (b) {
       value = { ...l }
       for (const field of new Set([...Object.keys(l), ...Object.keys(r), ...Object.keys(b)])) {
         if (['createdAt', 'updatedAt', 'useCount'].includes(field)) continue
         if (contentEqual(l[field], r[field]) || contentEqual(r[field], b[field])) continue
         if (contentEqual(l[field], b[field])) value[field] = r[field]
-        else conflict = true
+        else if (l.type === 'note' && field === 'content') {
+          const content = mergeNoteContent(b.content, l.content, r.content)
+          if (content) value.content = content
+          else conflict = true
+        } else conflict = true
       }
       stats.updated++
     } else conflict = true

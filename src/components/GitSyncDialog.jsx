@@ -65,7 +65,7 @@ function GitSyncDialog({ model, onCancel, onResolve, onPassword, onRestore }) {
     closable={!working} mask={{ closable: false }} keyboard={!working} onCancel={onCancel}>
     {working && <div className="sync-progress" role="status" aria-live="polite"><Spin /><p>{model.message}</p><p>正在处理加密数据，请稍候。</p></div>}
     {model.stage === 'conflicts' && <>
-      <Alert type="warning" showIcon title={`有 ${model.conflicts.length} 项差异需要处理`} description={`名称和内容一致的条目已跳过 ${model.stats?.skipped || 0} 项。确认前不会覆盖本地数据，取消可保留原状。`} />
+      <Alert type="warning" showIcon title={`有 ${model.conflicts.length} 项冲突需要处理`} description={`一致数据已跳过 ${model.stats?.skipped || 0} 项，单边和可安全合并的修改会自动处理。以下条目无法安全自动合并，或缺少共同基线，需要你选择。确认前不会覆盖本地数据。`} />
       <div className="sync-conflicts">{model.conflicts.map(item => <ConflictItem key={item.key} item={item} resolution={resolutions[item.key]} onChange={value => setResolutions(previous => ({ ...previous, [item.key]: value }))} />)}</div>
     </>}
     {model.stage === 'password' && <>

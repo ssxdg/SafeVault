@@ -19,19 +19,77 @@ function verifyMerge() {
   assert.equal(same.conflicts.length, 0)
   assert.equal(same.stats.skipped, 2)
   const changed = vault([note('n1', '本地新增内容')])
-  const conflict = mergeVaultData(changed, base, base)
+  const localOnly = mergeVaultData(changed, base, base)
+  assert.equal(localOnly.conflicts.length, 0)
+  assert.equal(localOnly.data.notepads[0].content.ops[0].insert, '本地新增内容\n')
+  const remoteOnly = mergeVaultData(base, changed, base)
+  assert.equal(remoteOnly.conflicts.length, 0)
+  assert.equal(remoteOnly.data.notepads[0].content.ops[0].insert, '本地新增内容\n')
+  const remoteChanged = vault([note('n1', '远端修改内容')])
+  const conflict = mergeVaultData(changed, remoteChanged, base)
   assert.equal(conflict.conflicts.length, 1)
   assert.equal(conflict.data.notepads[0].content.ops[0].insert, '本地新增内容\n')
   const key = conflict.conflicts[0].key
-  const both = mergeVaultData(changed, base, base, { [key]: { choice: 'both' } })
+  const both = mergeVaultData(changed, remoteChanged, base, { [key]: { choice: 'both' } })
   assert.equal(both.conflicts.length, 0)
   assert.equal(both.data.notepads.length, 2)
   assert.notEqual(both.data.notepads[0].id, both.data.notepads[1].id)
-  assert.equal(mergeVaultData(changed, base, base, { [key]: { choice: 'remote' } }).data.notepads[0].content.ops[0].insert, '原文\n')
+  assert.equal(mergeVaultData(changed, remoteChanged, base, { [key]: { choice: 'remote' } }).data.notepads[0].content.ops[0].insert, '远端修改内容\n')
+  // 同一篇笔记的不同位置分别修改时自动合并；相同位置的不同修改才是冲突。
+  const paragraphs = vault([note('paragraphs', '第一段\n第二段')])
+  const localParagraphs = vault([note('paragraphs', '本地第一段\n第二段')])
+  const remoteParagraphs = vault([note('paragraphs', '第一段\n远端第二段')])
+  const disjoint = mergeVaultData(localParagraphs, remoteParagraphs, paragraphs)
+  assert.equal(disjoint.conflicts.length, 0)
+  assert.equal(disjoint.data.notepads[0].content.ops.map(op => op.insert).join(''), '本地第一段\n远端第二段\n')
+  assert(contentEqual(mergeVaultData(remoteParagraphs, localParagraphs, paragraphs).data.notepads, disjoint.data.notepads))
+  const sharedBody = '原始正文包含详细内容和结束标记'
+  const sharedInsertion = mergeVaultData(vault([note('shared', `共同新增${sharedBody}`)]),
+    vault([note('shared', `共同新增${sharedBody}\n远端补充`)]), vault([note('shared', sharedBody)]))
+  assert.equal(sharedInsertion.conflicts.length, 0)
+  assert.equal(sharedInsertion.data.notepads[0].content.ops.map(op => op.insert).join(''), `共同新增${sharedBody}\n远端补充\n`)
+  const formatBase = vault([note('format', '正文')])
+  const bold = structuredClone(formatBase)
+  const colored = structuredClone(formatBase)
+  bold.notepads[0].content.ops[0].attributes = { bold: true }
+  colored.notepads[0].content.ops[0].attributes = { color: '#ff0000' }
+  const formatted = mergeVaultData(bold, colored, formatBase)
+  assert.equal(formatted.conflicts.length, 0)
+  assert.deepEqual(formatted.data.notepads[0].content.ops[0].attributes, { bold: true, color: '#ff0000' })
+  const otherColor = structuredClone(colored)
+  otherColor.notepads[0].content.ops[0].attributes.color = '#00ff00'
+  assert.equal(mergeVaultData(colored, otherColor, formatBase).conflicts.length, 1)
+  // Quill 的标题/列表互斥，代码块也无法保留行内图片或粗体；不能仅凭属性键不同就自动组合。
+  const lineVersion = (attributes, body = [{ insert: '正文' }]) => {
+    const data = structuredClone(formatBase)
+    data.notepads[0].content = { ops: [...body, { insert: '\n', ...(attributes ? { attributes } : {}) }] }
+    return data
+  }
+  assert.equal(mergeVaultData(lineVersion({ header: 1 }), lineVersion({ list: 'bullet' }), formatBase).conflicts.length, 1)
+  const codeBlock = lineVersion({ 'code-block': 'plain' })
+  assert.equal(mergeVaultData(lineVersion(null, [{ insert: '正文', attributes: { bold: true } }]), codeBlock, formatBase).conflicts.length, 1)
+  const embedded = lineVersion(null, [{ insert: '正文' }, { insert: { image: 'data:image/png;base64,iVBORw0KGgo=' } }])
+  assert.equal(mergeVaultData(embedded, codeBlock, formatBase).conflicts.length, 1)
+  const document = ops => {
+    const data = structuredClone(formatBase)
+    data.notepads[0].content = { ops }
+    return data
+  }
+  const imageOp = { insert: { image: 'data:image/png;base64,iVBORw0KGgo=' } }
+  const splitBase = document([{ insert: 'abcdef\n' }])
+  const splitCode = document([{ insert: 'abc' }, { insert: '\n', attributes: { 'code-block': 'plain' } }, { insert: 'def\n' }])
+  const splitImage = document([{ insert: 'a' }, imageOp, { insert: 'bcdef\n' }])
+  assert.equal(mergeVaultData(splitCode, splitImage, splitBase).conflicts.length, 1)
+  const joinBase = document([{ insert: 'abc\ndef' }, { insert: '\n', attributes: { 'code-block': 'plain' } }])
+  const joinedCode = document([{ insert: 'abcdef' }, { insert: '\n', attributes: { 'code-block': 'plain' } }])
+  const joinImage = document([{ insert: 'a' }, imageOp, { insert: 'bc\ndef' }, { insert: '\n', attributes: { 'code-block': 'plain' } }])
+  assert.equal(mergeVaultData(joinedCode, joinImage, joinBase).conflicts.length, 1)
+  const deletionBase = vault([note('deletion', 'abcdef')])
+  assert.equal(mergeVaultData(vault([note('deletion', 'abef')]), vault([note('deletion', 'abcXdef')]), deletionBase).conflicts.length, 1)
   assert.equal(mergeVaultData(vault([note('old', '相同')]), vault([note('new', '相同')])).data.notepads.length, 1)
   assert.equal(mergeVaultData(vault([note('old', '甲')]), vault([note('new', '乙')])).conflicts.length, 1)
   const legacyIds = mergeVaultData(vault([note('legacy-local', '新内容')]), base, base)
-  assert.equal(legacyIds.conflicts.length, 1)
+  assert.equal(legacyIds.conflicts.length, 0)
   assert.equal(legacyIds.data.notepads[0].id, 'n1')
   assert.equal(mergeVaultData(vault([note('a', '甲', '同名'), note('b', '乙', '同名')]), vault([note('c', '丙', '同名')])).data.notepads.length, 3)
   const deleted = mergeVaultData(vault([]), base, base)
@@ -88,7 +146,9 @@ function verifyMerge() {
   assert(contentEqual(repeatedDuplicateMerge.data.notepads, duplicateMerge.data.notepads))
   const changedDuplicate = structuredClone(duplicateNotes)
   changedDuplicate.notepads[1].content = { ops: [{ insert: '新增内容\n' }] }
-  assert.equal(mergeVaultData(duplicateMerge.data, changedDuplicate, duplicateMerge.data).conflicts.length, 1)
+  const changedDuplicateMerge = mergeVaultData(duplicateMerge.data, changedDuplicate, duplicateMerge.data)
+  assert.equal(changedDuplicateMerge.conflicts.length, 0)
+  assert.equal(changedDuplicateMerge.data.notepads[1].content.ops[0].insert, '新增内容\n')
 }
 
 async function verifySafeSync(root, storage) {
@@ -128,16 +188,16 @@ async function verifySafeSync(root, storage) {
   changed.notepads[0].content = { ops: [{ insert: '本地新内容\n', attributes: { bold: true } }] }
   await a.vault.saveData(changed)
   const preview = await a.manager.prepareSync()
-  assert.equal(preview.conflicts.length, 1)
+  assert.equal(preview.conflicts.length, 0)
   a.manager.cancelSync()
   assert.equal((await a.manager.completeSync(preview.token)).success, false)
   assert.equal(contentEqual(await a.vault.getData(), normalizeData(changed)), true)
   const ready = await a.manager.prepareSync()
-  const uploaded = await a.manager.completeSync(ready.token, { [ready.conflicts[0].key]: { choice: 'local' } })
+  const uploaded = await a.manager.completeSync(ready.token)
   assert.equal(uploaded.success, true, uploaded.error)
   const pull = await b.manager.prepareSync({ mode: 'pull' })
-  assert.equal(pull.conflicts.length, 1)
-  const pulled = await b.manager.completeSync(pull.token, { [pull.conflicts[0].key]: { choice: 'remote' } })
+  assert.equal(pull.conflicts.length, 0)
+  const pulled = await b.manager.completeSync(pull.token)
   assert.equal(pulled.success, true, pulled.error)
   assert.equal(pulled.data.notepads[0].content.ops[0].insert, '本地新内容\n')
   const history = await b.manager.listSnapshots()
@@ -191,6 +251,23 @@ async function verifySafeSync(root, storage) {
   assert.equal(uploadOnly.success, true, uploadOnly.error)
   assert.equal(uploadOnly.conflicts.length, 0)
   assert.equal((await a.manager.completeSync(uploadOnly.token)).success, true)
+  // 两个已建立基线的设备各自修改同一处时，才出现真正的冲突供选择。
+  const d = await device('safe-d', await a.vault.getData())
+  const dInitial = await d.manager.prepareSync()
+  assert.equal(dInitial.conflicts.length, 0)
+  assert.equal((await d.manager.completeSync(dInitial.token)).success, true)
+  const aConcurrent = await a.vault.getData()
+  aConcurrent.notepads[0].content = { ops: [{ insert: '设备甲修改\n' }] }
+  const dConcurrent = await d.vault.getData()
+  dConcurrent.notepads[0].content = { ops: [{ insert: '设备乙修改\n' }] }
+  await a.vault.saveData(aConcurrent)
+  await d.vault.saveData(dConcurrent)
+  const aAuto = await a.manager.prepareSync()
+  assert.equal(aAuto.conflicts.length, 0)
+  assert.equal((await a.manager.completeSync(aAuto.token)).success, true)
+  const dConflict = await d.manager.prepareSync()
+  assert.equal(dConflict.conflicts.length, 1)
+  assert.equal((await d.manager.completeSync(dConflict.token, { [dConflict.conflicts[0].key]: { choice: 'both' } })).success, true)
   const beforeFailure = await b.vault.getData()
   const failurePreview = await b.manager.prepareSync({ mode: 'import', importData: { ...seed,
     notepads: [{ id: 'disk-failure', name: '写盘失败测试', content: { ops: [{ insert: '不可丢失\n' }] } }] } })
