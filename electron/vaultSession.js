@@ -111,6 +111,8 @@ class VaultSession {
   }
 
   async lock(reason = 'manual') {
+    // 不自动锁定表示当前机器可信；系统锁屏不结束会话，手动锁定和退出仍生效。
+    if (reason === 'system' && this.idleTimeoutMinutes === 0) return { success: true }
     this.clearIdleTimer()
     this.state = 'locked'
     this.reason = reason

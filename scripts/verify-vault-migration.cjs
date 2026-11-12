@@ -233,6 +233,10 @@ async function verifyEncryptedBackupAndDangerousPlaintextExport() {
     const plaintextRaw = await fs.readFile(plaintextBackup, 'utf8')
     assert.strictEqual(plaintextRaw.includes('Backup-Secret-789'), true)
 
+    // 安全环境复用会话主密码；默认模式仍禁止无密码导出。
+    assert.strictEqual((await manager.exportPlaintextVault(null)).success, false)
+    assert.strictEqual((await manager.exportPlaintextVault(null, undefined, { useSession: true })).success, true)
+
     openPath = plaintextBackup
     const wrongPlaintextImport = await manager.importEncryptedVault(null, 'wrong-password')
     assert.strictEqual(wrongPlaintextImport.success, false)
@@ -240,6 +244,23 @@ async function verifyEncryptedBackupAndDangerousPlaintextExport() {
     const importedPlaintext = await manager.importEncryptedVault(null, PASSWORD)
     assert.strictEqual(importedPlaintext.success, true)
     assert.strictEqual(importedPlaintext.data.tabs[0].accounts[0].password, 'Backup-Secret-789')
+
+    assert.strictEqual((await manager.importEncryptedVault(null, undefined, { useSession: true })).success, true)
+    openPath = encryptedBackup
+    assert.strictEqual((await manager.importEncryptedVault(null, undefined, { useSession: true })).success, true)
+    // 其他主密码加密的备份必须提示输入备份密码，重试无需重新选择文件。
+    const otherPassword = 'other-backup-password'
+    const otherBackup = path.join(directory, 'other-encrypted.json')
+    await fs.writeFile(otherBackup, JSON.stringify(await encryptVault(created.data, otherPassword)), 'utf8')
+    openPath = otherBackup
+    const needsPassword = await manager.importEncryptedVault(null, undefined, { useSession: true })
+    assert.strictEqual(needsPassword.needsPassword, true)
+    openPath = encryptedBackup
+    assert.strictEqual((await manager.importEncryptedVault(null, otherPassword, { useSession: true })).success, true)
+    manager.lockVault()
+    assert.strictEqual((await manager.exportPlaintextVault(null, undefined, { useSession: true })).success, false)
+    openPath = plaintextBackup
+    assert.strictEqual((await manager.importEncryptedVault(null, undefined, { useSession: true })).success, false)
 
     const invalidBackup = path.join(directory, 'invalid.json')
     await fs.writeFile(invalidBackup, JSON.stringify({ unrelated: true }), 'utf8')

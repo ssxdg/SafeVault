@@ -4,6 +4,8 @@ const path = require('path')
 const { spawn } = require('child_process')
 const { decryptVault, isVaultEnvelope } = require('./vaultCrypto')
 const { normalizeData } = require('./dataNormalizer')
+const { randomUUID } = require('crypto')
+const { mergeVaultData, mergeVaultWriteData, contentEqual } = require('./vaultMerge')
 
 const VAULT_FILE = 'safe_vault.json'
 
@@ -46,10 +48,14 @@ function runGit(args, { cwd, env, timeoutMs = 60_000 } = {}) {
   })
 }
 
-function createGitSyncManager({ userDataPath, safeStorage, allowLocalRemote = false } = {}) {
+function createGitSyncManager({ userDataPath, safeStorage, allowLocalRemote = false, vault } = {}) {
   const settingsFile = path.join(userDataPath, 'git_sync_settings.json')
   // 远端提交必须在界面完成合并、写盘后才可成为新的同步基线。
   let pendingPull = null
+  const baselineFile = path.join(userDataPath, 'git_sync_baseline.json')
+  const snapshotsPath = path.join(userDataPath, 'sync-snapshots')
+  let pendingSync = null
+  let generation = 0
 
   async function readSettings() {
     try { return JSON.parse(await fs.readFile(settingsFile, 'utf8')) } catch (error) {
@@ -103,6 +109,7 @@ function createGitSyncManager({ userDataPath, safeStorage, allowLocalRemote = fa
       }
       await writeSettings(settings)
       pendingPull = null
+      cancelSync()
       return { success: true, ...publicSettings(settings) }
     } catch (error) { return { success: false, error: error.message } }
   }
@@ -226,7 +233,182 @@ function createGitSyncManager({ userDataPath, safeStorage, allowLocalRemote = fa
     } catch (error) { return { success: false, error: error.message } }
   }
 
-  return { getSettings, saveSettings, testConnection, pull, confirmPull, push }
+  async function writeEncryptedFile(file, data) {
+    const envelope = await vault.encrypt(data)
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(`${file}.tmp`, JSON.stringify(envelope), { encoding: 'utf8', mode: 0o600 })
+    // 回读验证后替换，快照或基线落盘失败不能继续写入用户数据。
+    const verified = await vault.decrypt(JSON.parse(await fs.readFile(`${file}.tmp`, 'utf8')))
+    if (!contentEqual(verified, data)) throw new Error('同步备份回读验证失败。')
+    await fs.rename(`${file}.tmp`, file)
+  }
+
+  async function readBaseline(remoteUrl) {
+    try {
+      const data = await vault.decrypt(JSON.parse(await fs.readFile(baselineFile, 'utf8')))
+      return data.remoteUrl === remoteUrl ? data : null
+    } catch (error) {
+      if (error.code === 'ENOENT') return null
+      throw new Error(`同步基线读取失败，已停止同步：${error.message}`)
+    }
+  }
+
+  async function snapshot(data, reason) {
+    const id = `${Date.now()}-${randomUUID()}.json`
+    await writeEncryptedFile(path.join(snapshotsPath, id), { data, reason, createdAt: new Date().toISOString() })
+    return id
+  }
+
+  function cancelSync() {
+    generation++
+    pendingSync = null
+    pendingPull = null
+    return { success: true }
+  }
+
+  // 准备阶段只读取和计算，不写本地数据、不推进基线，取消冲突处理不会改变数据。
+  async function prepareSync({ mode = 'sync', password, importData } = {}) {
+    const ticket = ++generation
+    pendingSync = null
+    try {
+      if (!vault || !['sync', 'pull', 'push', 'import'].includes(mode)) throw new Error('同步方式无效。')
+      const local = structuredClone(await vault.getData())
+      let state
+      if (mode === 'import') {
+        if (!importData) throw new Error('没有可导入的数据。')
+        state = { remote: { ...normalizeData(importData), syncTombstones: [] }, base: null, head: null }
+      } else {
+        state = await withClone(async ({ settings, clonePath, head }) => {
+          const base = await readBaseline(settings.remoteUrl)
+          let envelope
+          try {
+            const file = path.join(clonePath, VAULT_FILE)
+            if (!(await fs.lstat(file)).isFile()) throw new Error('远端密码库文件无效。')
+            envelope = JSON.parse(await fs.readFile(file, 'utf8'))
+          } catch (error) {
+            if (error.code !== 'ENOENT') throw error
+            if (base) throw new Error('远端密码库已被删除，请核对仓库后再同步。')
+          }
+          let remote = null
+          if (envelope) {
+            if (!isVaultEnvelope(envelope)) throw new Error('远端不是有效的加密密码库。')
+            try { remote = normalizeData(await vault.decrypt(envelope)) } catch {
+              if (!password) {
+                const error = new Error('远端密码库无法用当前主密码解密，请输入远端主密码。')
+                error.needsPassword = true
+                throw error
+              }
+              remote = normalizeData(await decryptVault(envelope, password))
+            }
+          }
+          if (mode === 'pull' && !remote) throw new Error('远端还没有密码库，请先上传。')
+          if (mode === 'push' && remote && base?.commit !== head) throw new Error('远端版本尚未合并，请使用“立即同步”。')
+          return { remote, base, head, remoteUrl: settings.remoteUrl }
+        })
+      }
+      if (ticket !== generation) throw new Error('同步已取消或密码库已锁定。')
+      if (!contentEqual(local, await vault.getData())) throw new Error('本地数据已变化，请重新同步。')
+      const remote = state.remote || { tabs: [], notepads: [] }
+      const result = mode === 'push' ? mergeVaultWriteData(local, remote, state.base?.data) : mergeVaultData(local, remote, state.base?.data)
+      const token = randomUUID()
+      pendingSync = { ...state, local, mode, token, generation: ticket, remote }
+      return { success: true, token, conflicts: result.conflicts, stats: result.stats }
+    } catch (error) { return { success: false, error: error.message, needsPassword: Boolean(error.needsPassword) } }
+  }
+
+  async function completeSync(token, resolutions = {}) {
+    const pending = pendingSync
+    try {
+      if (!pending || pending.token !== token || pending.generation !== generation) throw new Error('同步已取消或过期，请重新同步。')
+      if (!contentEqual(await vault.getData(), pending.local)) throw new Error('本地数据已变化，已停止覆盖，请重新同步。')
+      const result = pending.mode === 'push' ? mergeVaultWriteData(pending.local, pending.remote, pending.base?.data)
+        : mergeVaultData(pending.local, pending.remote, pending.base?.data, resolutions)
+      if (result.conflicts.length) return { success: false, error: '请先处理所有冲突。', conflicts: result.conflicts }
+      const merged = normalizeData(result.data)
+      const saveLocal = async () => {
+        if (pending.generation !== generation) throw new Error('同步已取消或密码库已锁定。')
+        if (!contentEqual(merged, pending.local)) {
+          await snapshot(pending.local, pending.mode === 'import' ? '文件导入前' : 'Git 同步前')
+          if (pending.generation !== generation) throw new Error('同步已取消或密码库已锁定。')
+          if (!contentEqual(await vault.getData(), pending.local)) throw new Error('本地数据已变化，已停止覆盖。')
+          const saved = await vault.saveData(merged)
+          if (!saved.success) throw new Error(saved.error || '本地数据保存失败。')
+        }
+      }
+      let uploaded = false
+      if (pending.mode === 'import') await saveLocal()
+      else await withClone(async ({ settings, clonePath, env, head }) => {
+        if (settings.remoteUrl !== pending.remoteUrl || head !== pending.head) {
+          throw new Error('远端已再次更新，请重新同步；本次未覆盖本地或远端数据。')
+        }
+        await saveLocal()
+        let commit = head
+        if (pending.mode !== 'pull' && !contentEqual(syncContent(merged), syncContent(pending.remote))) {
+          const envelope = await vault.encrypt(merged)
+          const branch = await runGit(['-C', clonePath, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { env })
+          if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)) throw new Error('远端分支名称无效。')
+          await fs.writeFile(path.join(clonePath, VAULT_FILE), JSON.stringify(envelope, null, 2), 'utf8')
+          await runGit(['-C', clonePath, 'add', '--', VAULT_FILE], { env })
+          await runGit(['-C', clonePath, '-c', 'user.name=SafeVault', '-c', 'user.email=safevault@local.invalid', '-c', 'core.hooksPath=NUL', 'commit', '-m', '同步加密密码库', '--', VAULT_FILE], { env })
+          // 普通 push 会拒绝并发产生的非快进提交；失败时保留已合并的本地数据和旧基线。
+          if (pending.generation !== generation) throw new Error('同步已取消或密码库已锁定，未开始上传。')
+          await runGit(['-C', clonePath, 'push', 'origin', `HEAD:refs/heads/${branch}`], { env })
+          commit = await runGit(['-C', clonePath, 'rev-parse', 'HEAD'], { env })
+          uploaded = true
+        }
+        if (pending.generation !== generation) throw new Error('密码库已锁定，请解锁后重新检查同步状态。')
+        await writeEncryptedFile(baselineFile, { remoteUrl: settings.remoteUrl, commit,
+          data: pending.mode === 'pull' ? pending.remote : merged })
+        await writeSettings({ ...settings, lastCommit: commit, lastSyncAt: new Date().toISOString() })
+      })
+      pendingSync = null
+      return { success: true, data: merged, stats: result.stats, uploaded, mode: pending.mode }
+    } catch (error) {
+      pendingSync = null
+      // 上传或基线保存失败后，把真正已落盘的数据返还界面，避免旧快照再次自动保存。
+      let data
+      try { data = await vault.getData() } catch {}
+      return { success: false, error: error.message, data }
+    }
+  }
+
+  // 当前页签和主题留在本机；修改时间和加密随机数不能造成重复上传。
+  function syncContent(data) {
+    const { theme, activeNotepadId, ...content } = data
+    const strip = value => {
+      if (Array.isArray(value)) return value.map(strip)
+      if (!value || typeof value !== 'object') return value
+      return Object.fromEntries(Object.entries(value).filter(([key]) => !['createdAt', 'updatedAt', 'deletedAt'].includes(key)).map(([key, item]) => [key, strip(item)]))
+    }
+    return strip(content)
+  }
+
+  async function listSnapshots() {
+    try {
+      const files = await fs.readdir(snapshotsPath).catch(error => { if (error.code === 'ENOENT') return []; throw error })
+      return { success: true, snapshots: files.filter(id => /^\d+-[a-f0-9-]+\.json$/.test(id)).sort().reverse().map(id => ({ id, createdAt: new Date(Number(id.split('-')[0])).toISOString() })) }
+    } catch (error) { return { success: false, error: error.message } }
+  }
+
+  async function restoreSnapshot(id) {
+    const ticket = generation
+    try {
+      if (typeof id !== 'string' || !/^\d+-[a-f0-9-]+\.json$/.test(id)) throw new Error('备份编号无效。')
+      const previous = await vault.decrypt(JSON.parse(await fs.readFile(path.join(snapshotsPath, id), 'utf8')))
+      const current = await vault.getData()
+      await snapshot(current, '恢复备份前')
+      if (ticket !== generation) throw new Error('恢复已取消或密码库已锁定。')
+      if (!contentEqual(current, await vault.getData())) throw new Error('本地数据已变化，已停止恢复。')
+      const restored = normalizeData(previous.data)
+      const result = await vault.saveData(restored)
+      if (!result.success) throw new Error(result.error)
+      cancelSync()
+      return { success: true, data: result.data }
+    } catch (error) { return { success: false, error: error.message } }
+  }
+
+  return { getSettings, saveSettings, testConnection, pull, confirmPull, push,
+    prepareSync, completeSync, cancelSync, listSnapshots, restoreSnapshot, backupData: snapshot }
 }
 
 module.exports = { createGitSyncManager, validateRemoteUrl }

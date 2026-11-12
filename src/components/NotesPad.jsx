@@ -4,6 +4,10 @@ import 'react-quill-new/dist/quill.snow.css'
 
 const Quill = ReactQuill.Quill
 const BlockEmbed = Quill.import('blots/block/embed')
+const icons = Quill.import('ui/icons')
+// 复用 Quill 原有图标，颜色按钮负责重复应用，旁边的色板负责选择新颜色。
+icons['apply-color'] = icons.color
+icons['apply-background'] = icons.background
 
 // 分割线作为独立文档块保存，继续沿用现有 Delta 数据格式。
 class DividerBlot extends BlockEmbed {}
@@ -27,7 +31,7 @@ function normalizeToDelta(content) {
 const TOOLBAR_OPTIONS = [
   [{ header: [1, 2, 3, 4, 5, 6, false] }, { size: ['small', false, 'large', 'huge'] }],
   ['bold', 'italic', 'underline', 'strike', 'code'],
-  [{ color: [] }, { background: [] }],
+  ['apply-color', { color: [] }, 'apply-background', { background: [] }],
   [{ script: 'super' }, { script: 'sub' }],
   [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
   [{ align: [] }, { indent: '-1' }, { indent: '+1' }],
@@ -44,8 +48,10 @@ const TOOLBAR_TITLES = [
   ['.ql-strike', '删除线（Ctrl+Shift+X）'],
   ['.ql-code', '行内代码（Ctrl+E）'],
   ['.ql-size .ql-picker-label', '字号'],
-  ['.ql-color .ql-picker-label', '文字颜色'],
-  ['.ql-background .ql-picker-label', '文字高亮'],
+  ['.ql-apply-color', '应用上次文字颜色'],
+  ['.ql-color .ql-picker-label', '选择文字颜色'],
+  ['.ql-apply-background', '应用上次高亮颜色'],
+  ['.ql-background .ql-picker-label', '选择高亮颜色'],
   ['.ql-script[value="super"]', '上标'],
   ['.ql-script[value="sub"]', '下标'],
   ['.ql-list[value="ordered"]', '有序列表（Ctrl+Shift+7）'],
@@ -55,7 +61,7 @@ const TOOLBAR_TITLES = [
   ['.ql-indent[value="-1"]', '减少缩进（Ctrl+[）'],
   ['.ql-indent[value="+1"]', '增加缩进（Ctrl+]）'],
   ['.ql-blockquote', '引用块（Ctrl+Shift+U）'],
-  ['.ql-code-block', '代码块'],
+  ['.ql-code-block', '代码块（末尾空行回车退出，Ctrl+Enter 新起正文）'],
   ['.ql-divider', '插入分割线（Alt+Ctrl+S）'],
   ['.ql-table', '选择表格行数和列数（Ctrl+Shift+T）'],
   ['.ql-link', '插入链接'],
@@ -98,6 +104,7 @@ const SHORTCUT_GROUPS = [
     { label: '任务列表', keys: 'Alt+Ctrl+T', markdown: '[ ] 文字' },
     { label: '引用', keys: 'Ctrl+Shift+U', markdown: '> 文字' },
     { label: '代码块', markdown: '\u0060\u0060\u0060 + Enter' },
+    { label: '退出代码块并新起正文', keys: 'Ctrl+Enter', markdown: '代码块末尾空行按 Enter' },
     { label: '分割线', keys: 'Alt+Ctrl+S', markdown: '--- + Enter' },
     { label: '插入表格（可选行列）', keys: 'Ctrl+Shift+T', markdown: '|列1|列2| + Enter' },
     { label: '链接', keys: 'Ctrl+K', markdown: '[文字](地址)' },
@@ -214,6 +221,15 @@ function NotesPad({
   const editorWrapRef = useRef(null)
   const dismissedHintRef = useRef('')
   const hintKeyRef = useRef('')
+  const recentColorsRef = useRef({ color: '#e60000', background: '#ffff00' })
+
+  const updateColorButton = useCallback((quill, format, value) => {
+    const button = quill.getModule('toolbar')?.container?.querySelector(`.ql-apply-${format}`)
+    const indicator = button?.querySelector('.ql-color-label')
+    if (!indicator) return
+    const property = indicator.tagName.toLowerCase() === 'line' ? 'stroke' : 'fill'
+    indicator.style[property] = value || (format === 'color' ? 'var(--text)' : 'transparent')
+  }, [])
 
   useEffect(() => {
     if (timerRef.current) {
@@ -385,6 +401,31 @@ function NotesPad({
     const stop = () => {
       event.preventDefault()
       event.stopPropagation()
+    }
+    if (quill.getFormat(range)['code-block']) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.altKey && range.length === 0) {
+        const [line] = quill.getLine(range.index)
+        if (isCtrl) {
+          // 从整个代码块之后新起正文，保留当前行和后续代码的格式及内容。
+          let lastLine = line
+          while (lastLine.next?.formats()['code-block']) lastLine = lastLine.next
+          const end = quill.getIndex(lastLine) + lastLine.length()
+          quill.insertText(end - 1, '\n', 'user')
+          quill.formatLine(end, 1, 'code-block', false, 'user')
+          quill.setSelection(end, 0, 'user')
+          setMarkdownHint(null)
+          stop()
+        } else if (context?.text.trim() === '' && !line.next?.formats()['code-block']) {
+          // 末尾空行再按回车即可退出；中间空行和 Shift+Enter 继续保留在代码块内。
+          if (context.text.length) quill.deleteText(context.start, context.text.length, 'user')
+          quill.formatLine(context.start, 1, 'code-block', false, 'user')
+          quill.setSelection(context.start, 0, 'user')
+          setMarkdownHint(null)
+          stop()
+        }
+      }
+      // 代码中的 Markdown 标记必须按原样保存，缩进也交回 Quill 处理。
+      return
     }
     if (event.key === 'Escape' && markdownHint) {
       dismissedHintRef.current = markdownHint.key
@@ -592,6 +633,22 @@ function NotesPad({
     toolbar: {
       container: TOOLBAR_OPTIONS,
       handlers: {
+        color(value) {
+          recentColorsRef.current.color = value || false
+          this.quill.format('color', value || false, 'user')
+          updateColorButton(this.quill, 'color', value)
+        },
+        background(value) {
+          recentColorsRef.current.background = value || false
+          this.quill.format('background', value || false, 'user')
+          updateColorButton(this.quill, 'background', value)
+        },
+        'apply-color'() {
+          this.quill.format('color', recentColorsRef.current.color, 'user')
+        },
+        'apply-background'() {
+          this.quill.format('background', recentColorsRef.current.background, 'user')
+        },
         divider() {
           const range = this.quill.getSelection(true)
           if (range) insertDivider(this.quill, range.index, range.length)
@@ -601,7 +658,7 @@ function NotesPad({
         },
       },
     },
-  }), [insertDivider, openTablePicker])
+  }), [insertDivider, openTablePicker, updateColorButton])
 
   const handleQuillRef = useCallback((el) => {
     quillRef.current = el
@@ -617,15 +674,20 @@ function NotesPad({
       if (toolbar?.container) {
         TOOLBAR_TITLES.forEach(([selector, title]) => {
           const el = toolbar.container.querySelector(selector)
-          if (el) el.setAttribute('title', title)
+          if (el) {
+            el.setAttribute('title', title)
+            el.setAttribute('aria-label', title)
+          }
         })
+        updateColorButton(quill, 'color', recentColorsRef.current.color)
+        updateColorButton(quill, 'background', recentColorsRef.current.background)
       }
       quill.on('text-change', () => requestAnimationFrame(refreshMarkdownHint))
       quill.on('selection-change', () => requestAnimationFrame(refreshMarkdownHint))
       quill.root.addEventListener('scroll', refreshMarkdownHint, { passive: true })
       quill.root.addEventListener('compositionstart', () => setMarkdownHint(null))
     }, 0)
-  }, [refreshMarkdownHint])
+  }, [refreshMarkdownHint, updateColorButton])
 
   return (
     <div className="notepad">

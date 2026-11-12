@@ -44,7 +44,7 @@ function GitSyncSettings({ onClose, onAlert }) {
         type: 'success',
         title: 'Git 仓库连接成功',
         message: connection.hasVault ? '已连接，仓库中有加密密码库。' : '已连接，仓库中暂无加密密码库。',
-        detail: connection.hasVault ? '可点击“Git 导入”拉取数据。推送权限将在“Git 导出”时验证。' : '可点击“Git 导出”推送本地数据。推送权限将在导出时验证。',
+        detail: '点击“立即同步”自动拉取、比较并上传；内容差异会逐条确认。上传时验证推送权限。',
       })
     } catch (error) {
       setMessage({ type: 'error', text: `连接验证失败：${error.message}` })
@@ -61,7 +61,7 @@ function GitSyncSettings({ onClose, onAlert }) {
           <button className="modal-close" type="button" onClick={onClose} aria-label="关闭 Git 设置" disabled={isSaving}>✕</button>
         </div>
         <form className="modal-form" onSubmit={handleSave}>
-          <p className="extension-settings-help">请先创建独立的私有仓库。仅同步加密密码库文件；其他设备导入时输入远端文件的主密码。</p>
+          <p className="extension-settings-help">请先创建独立的私有仓库。仅同步加密密码库文件；远端主密码不同时再提示输入。</p>
           <div className="form-group">
             <label htmlFor="git-remote-url">仓库地址</label>
             <input id="git-remote-url" value={remoteUrl} onChange={event => setRemoteUrl(event.target.value)} placeholder="git@github.com:user/private-vault.git" autoComplete="off" spellCheck={false} required />

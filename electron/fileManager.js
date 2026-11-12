@@ -14,6 +14,8 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
   const tempFile = `${dataFile}.tmp`
   const backupFile = `${dataFile}.pre-encryption-backup`
   let activePassword = null
+  let sessionGeneration = 0
+  let pendingEncryptedImport = null
 
   const getDialog = () => dialogApi || require('electron').dialog
 
@@ -65,7 +67,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     return { state: 'corrupt', error: '密码库不是有效的业务数据或加密信封。' }
   }
 
-  async function writeVerifiedEnvelope(data, password) {
+  async function writeVerifiedEnvelope(data, password, expectedSession = null) {
     const envelope = await encryptVault(data, password)
     await fsApi.writeFile(tempFile, JSON.stringify(envelope, null, 2), 'utf8')
 
@@ -79,6 +81,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
       throw new Error('加密密码库回读数据不一致。')
     }
 
+    if (expectedSession !== null && (expectedSession !== sessionGeneration || activePassword !== password)) throw new Error('密码库会话已变化，已停止写入。')
     await fsApi.rename(tempFile, dataFile)
   }
 
@@ -92,6 +95,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
       const data = normalizeData(null)
       await writeVerifiedEnvelope(data, password)
       activePassword = password
+      sessionGeneration++
       return { success: true, data }
     } catch (error) {
       return { success: false, error: error.message }
@@ -108,6 +112,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     try {
       const data = normalizeData(await decryptVault(state.envelope, password))
       activePassword = password
+      sessionGeneration++
       return { success: true, data }
     } catch (error) {
       return { success: false, error: error.message }
@@ -115,8 +120,31 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
   }
 
   function lockVault() {
+    sessionGeneration++
     activePassword = null
+    pendingEncryptedImport = null
     return { success: true }
+  }
+
+  function cancelImport() {
+    pendingEncryptedImport = null
+  }
+
+  // 同步基线和快照沿用当前会话的主密码，禁止在设置文件或渲染进程保存密码。
+  async function encryptSessionData(data) {
+    if (!activePassword) throw new Error('密码库尚未解锁。')
+    const ticket = sessionGeneration
+    const envelope = await encryptVault(data, activePassword)
+    if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止同步。')
+    return envelope
+  }
+
+  async function decryptSessionData(envelope) {
+    if (!activePassword) throw new Error('密码库尚未解锁。')
+    const ticket = sessionGeneration
+    const data = await decryptVault(envelope, activePassword)
+    if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止同步。')
+    return data
   }
 
   async function preservePlaintextBackup(raw) {
@@ -146,6 +174,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
       // 备份只服务于迁移事务；主文件完成加密替换后必须移除，避免磁盘长期残留明文密码。
       await fsApi.unlink(backupFile)
       activePassword = password
+      sessionGeneration++
       return { success: true, data: normalized }
     } catch (error) {
       return { success: false, error: error.message }
@@ -153,6 +182,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
   }
 
   async function writeEncryptedData(data) {
+    const ticket = sessionGeneration
     if (!activePassword) return { success: false, error: '密码库尚未解锁，不能写入数据。' }
 
     try {
@@ -165,7 +195,7 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
       }
 
       const normalized = normalizeData(data)
-      await writeVerifiedEnvelope(normalized, activePassword)
+      await writeVerifiedEnvelope(normalized, activePassword, ticket)
       return { success: true, data: normalized }
     } catch (error) {
       return { success: false, error: error.message }
@@ -211,17 +241,34 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
     }
   }
 
-  async function importEncryptedVault(mainWindow, password) {
-    const { filePaths, canceled } = await getDialog().showOpenDialog(mainWindow, {
-      filters: [{ name: 'JSON Files', extensions: ['json'] }],
-      properties: ['openFile'],
-    })
-    if (canceled || !filePaths || filePaths.length === 0) return { success: false, cancelled: true }
+  async function importEncryptedVault(mainWindow, password, { useSession = false } = {}) {
+    const ticket = sessionGeneration
     try {
-      const raw = await fsApi.readFile(filePaths[0], 'utf8')
-      const backup = JSON.parse(raw)
+      if (useSession && !activePassword) throw new Error('密码库尚未解锁。')
+      // 只在等待备份密码时暂存加密信封，避免重试密码还要重新选择文件。
+      let backup = password ? pendingEncryptedImport : null
+      pendingEncryptedImport = null
+      if (!backup) {
+        const { filePaths, canceled } = await getDialog().showOpenDialog(mainWindow, {
+          filters: [{ name: 'JSON Files', extensions: ['json'] }],
+          properties: ['openFile'],
+        })
+        if (canceled || !filePaths || filePaths.length === 0) return { success: false, cancelled: true }
+        backup = JSON.parse(await fsApi.readFile(filePaths[0], 'utf8'))
+      }
+      if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止导入。')
       if (isVaultEnvelope(backup)) {
-        return { success: true, data: normalizeData(await decryptVault(backup, password)) }
+        let data
+        try {
+          data = useSession && !password ? await decryptSessionData(backup) : await decryptVault(backup, password)
+        } catch (error) {
+          if (ticket !== sessionGeneration) throw error
+          if (!useSession) throw error
+          pendingEncryptedImport = backup
+          return { success: false, needsPassword: true, error: '无法解密备份，请输入该备份的密码。' }
+        }
+        if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止导入。')
+        return { success: true, data: normalizeData(data) }
       }
       if (backup?.format === ENCRYPTED_FORMAT) {
         throw new Error('备份不是有效的 SafeVault 加密文件。')
@@ -230,29 +277,34 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
         throw new Error('备份格式无效：请选择 SafeVault 导出的 JSON 文件。')
       }
 
-      // 明文备份没有自带密码；验证当前密码库主密码后才允许将其读入应用。
+      // 安全环境复用已解锁会话，其他模式仍要求验证当前主密码。
       const state = await inspectVault()
       if (state.state !== 'locked') throw new Error(state.error || '当前密码库不是可验证的加密文件。')
-      await decryptVault(state.envelope, password)
+      if (useSession) await decryptSessionData(state.envelope)
+      else await decryptVault(state.envelope, password)
+      if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止导入。')
       return { success: true, data: normalizeData(backup) }
     } catch (error) {
       return { success: false, error: error.message }
     }
   }
 
-  async function exportPlaintextVault(mainWindow, password) {
+  async function exportPlaintextVault(mainWindow, password, { useSession = false } = {}) {
+    const ticket = sessionGeneration
     try {
       const state = await inspectVault()
       if (state.state !== 'locked') {
         throw new Error(state.error || '当前密码库不是可验证的加密文件。')
       }
-      const data = normalizeData(await decryptVault(state.envelope, password))
+      // 会话主密码仅在主进程使用，不向渲染进程返回或持久化。
+      const data = normalizeData(useSession ? await decryptSessionData(state.envelope) : await decryptVault(state.envelope, password))
       const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
       const { filePath, canceled } = await getDialog().showSaveDialog(mainWindow, {
         defaultPath: `safe_vault_plaintext_${date}.json`,
         filters: [{ name: 'JSON Files', extensions: ['json'] }],
       })
       if (canceled || !filePath) return { success: false, cancelled: true }
+      if (ticket !== sessionGeneration) throw new Error('密码库会话已变化，已停止导出。')
       await fsApi.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8')
       return { success: true }
     } catch (error) {
@@ -261,10 +313,13 @@ function createFileManager({ dataFile, fsApi = fs, dialogApi } = {}) {
   }
 
   return {
+    cancelImport,
     inspectVault,
     createVault,
     unlockVault,
     lockVault,
+    encryptSessionData,
+    decryptSessionData,
     migratePlaintextVault,
     writeEncryptedData,
     readData,
@@ -293,6 +348,8 @@ module.exports = {
   createVault: (...args) => getDefaultManager().createVault(...args),
   unlockVault: (...args) => getDefaultManager().unlockVault(...args),
   lockVault: (...args) => getDefaultManager().lockVault(...args),
+  encryptSessionData: (...args) => getDefaultManager().encryptSessionData(...args),
+  decryptSessionData: (...args) => getDefaultManager().decryptSessionData(...args),
   migratePlaintextVault: (...args) => getDefaultManager().migratePlaintextVault(...args),
   writeEncryptedData: (...args) => getDefaultManager().writeEncryptedData(...args),
   readData: (...args) => getDefaultManager().readData(...args),

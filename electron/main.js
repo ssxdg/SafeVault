@@ -11,6 +11,7 @@ const { createBridgeServer, getCurrentUserSid, writeBridgeConfig } = require('./
 const { createNativeHostManager } = require('./nativeHostManager')
 const { createAppSettingsManager } = require('./appSettingsManager')
 const { createGitSyncManager } = require('./gitSyncManager')
+const { mergeVaultWriteData, getWriteSnapshots } = require('./vaultMerge')
 
 const isDev = !app.isPackaged
 // 用户主动开启置顶时使用 Electron 支持的高层级，兼容部分 Windows 环境默认 floating 层级不稳定的问题。
@@ -36,6 +37,19 @@ let clipboardManager
 let bridgeServer
 let nativeHostManager
 let appSettingsManager
+// 普通写入串行执行；同步预览至确认期间暂停编辑器和插件写入。
+let vaultMutationTail = Promise.resolve()
+let gitSyncBusy = false
+let gitOperationRunning = false
+function queueVaultMutation(action) {
+  if (gitSyncBusy) return Promise.resolve({ success: false, error: '正在同步或处理冲突，请完成后重试。' })
+  const task = vaultMutationTail.then(async () => {
+    await vaultSession.requireData()
+    return await action()
+  }).catch(error => ({ success: false, error: error.message }))
+  vaultMutationTail = task.then(() => {})
+  return task
+}
 let gitSyncManager
 
 function getBridgeExecutablePath() {
@@ -204,7 +218,20 @@ if (!gotTheLock) {
   // 只有获得单实例锁的应用才启动
   app.whenReady().then(async () => {
     appSettingsManager = createAppSettingsManager()
-    gitSyncManager = createGitSyncManager({ userDataPath: app.getPath('userData'), safeStorage })
+    gitSyncManager = createGitSyncManager({
+      userDataPath: app.getPath('userData'), safeStorage,
+      vault: {
+        getData: () => vaultSession.requireData(),
+        encrypt: data => fileManager.encryptSessionData(data),
+        decrypt: envelope => fileManager.decryptSessionData(envelope),
+        saveData: async data => {
+          if (!vaultSession.getData()) return { success: false, error: '密码库尚未解锁。' }
+          const result = await fileManager.writeEncryptedData(data)
+          if (result.success) vaultSession.replaceData(result.data)
+          return result
+        },
+      },
+    })
     const appSettings = appSettingsManager.readSettings()
     currentIconId = appSettings.iconId
     nativeHostManager = createNativeHostManager({
@@ -225,7 +252,11 @@ if (!gotTheLock) {
       lock: () => fileManager.lockVault(),
       idleTimeoutMinutes: appSettings.idleTimeoutMinutes,
       onStateChange: status => {
-        if (status.state === 'locked') clipboardManager.clearOwnedSecret()
+        if (status.state === 'locked') {
+          clipboardManager.clearOwnedSecret()
+          gitSyncManager.cancelSync()
+          if (!gitOperationRunning) gitSyncBusy = false
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('vault-status-changed', status)
         }
@@ -239,7 +270,7 @@ if (!gotTheLock) {
         userSid: getCurrentUserSid(),
         isUnlocked: () => vaultSession.getStatus().state === 'unlocked',
         getVaultData: () => vaultSession.requireData(),
-        updateCredential: async ({ accountId, newPassword }) => {
+        updateCredential: async ({ accountId, newPassword }) => queueVaultMutation(async () => {
           const currentData = await vaultSession.requireData()
           const updatedData = structuredClone(currentData)
           const account = updatedData.tabs
@@ -256,8 +287,8 @@ if (!gotTheLock) {
             mainWindow.webContents.send('vault-credential-updated', { accountId, newPassword, updatedAt: account.updatedAt })
           }
           return { success: true }
-        },
-        createCredential: async ({ origin, loginUrl, accountName, username, password, tabId }) => {
+        }),
+        createCredential: async ({ origin, loginUrl, accountName, username, password, tabId }) => queueVaultMutation(async () => {
           const currentData = await vaultSession.requireData()
           const updatedData = structuredClone(currentData)
           const targetTab = updatedData.tabs.find(tab => tab.id === tabId)
@@ -278,8 +309,8 @@ if (!gotTheLock) {
             mainWindow.webContents.send('vault-credential-created', { account, tabId: targetTab.id })
           }
           return { success: true, accountId }
-        },
-        renameTab: async ({ tabId, tabName }) => {
+        }),
+        renameTab: async ({ tabId, tabName }) => queueVaultMutation(async () => {
           const currentData = await vaultSession.requireData()
           const updatedData = structuredClone(currentData)
           const targetTab = updatedData.tabs.find(tab => tab.id === tabId && tab.id !== 'default-tab')
@@ -293,7 +324,7 @@ if (!gotTheLock) {
             mainWindow.webContents.send('vault-tab-renamed', { tabId, tabName })
           }
           return { success: true }
-        },
+        }),
       })
       writeBridgeConfig({
         ...bridgeServer,
@@ -653,31 +684,42 @@ ipcMain.handle('login-target-capture-foreground', async () => {
   return result
 })
 
-ipcMain.handle('vault-write-data', async (event, data) => {
+ipcMain.handle('vault-write-data', async (event, data, baseData) => queueVaultMutation(async () => {
   if (vaultSession.getStatus().state !== 'unlocked') {
     return { success: false, error: '密码库尚未解锁，不能写入数据。' }
   }
-  const result = await fileManager.writeEncryptedData(data)
+  const snapshots = getWriteSnapshots(data, baseData)
+  if (!snapshots.base || typeof snapshots.base !== 'object') {
+    await gitSyncManager.backupData(snapshots.data, '旧版界面未保存的编辑')
+    return { success: false, error: '界面与 Electron 保存接口版本不一致。当前编辑已存入加密备份，请完整退出后重新启动；可在“同步备份与恢复”中找回。' }
+  }
+  const merged = mergeVaultWriteData(snapshots.data, await vaultSession.requireData(), snapshots.base)
+  if (merged.conflicts.length) {
+    await gitSyncManager.backupData(snapshots.data, '并发编辑未保存的内容')
+    return { success: false, error: '插件和编辑器同时修改了相同内容，已停止覆盖。未保存的编辑已存入最近的加密备份，可通过同步备份与恢复找回。' }
+  }
+  const result = await fileManager.writeEncryptedData(merged.data)
   if (result.success) vaultSession.replaceData(result.data)
   return result
-})
+}))
 ipcMain.handle('vault-export-encrypted', async () => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await fileManager.exportEncryptedVault(mainWindow)
 })
 ipcMain.handle('vault-import-encrypted', async (event, password) => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
-  return await fileManager.importEncryptedVault(mainWindow, password)
+  return await fileManager.importEncryptedVault(mainWindow, password, { useSession: vaultSession.getStatus().idleTimeoutMinutes === 0 })
 })
 ipcMain.handle('vault-export-plaintext', async (event, password) => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
-  return await fileManager.exportPlaintextVault(mainWindow, password)
+  return await fileManager.exportPlaintextVault(mainWindow, password, { useSession: vaultSession.getStatus().idleTimeoutMinutes === 0 })
 })
 ipcMain.handle('git-sync-settings', async () => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await gitSyncManager.getSettings()
 })
 ipcMain.handle('git-sync-save-settings', async (event, settings) => {
+  if (gitSyncBusy) return { success: false, error: '请先完成或取消同步。' }
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await gitSyncManager.saveSettings(settings)
 })
@@ -685,20 +727,62 @@ ipcMain.handle('git-sync-test-connection', async () => {
   if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
   return await gitSyncManager.testConnection()
 })
-ipcMain.handle('git-sync-push', async () => {
-  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
-  const state = await fileManager.inspectVault()
-  if (state.state !== 'locked') return { success: false, error: state.error || '本地密码库不是有效的加密文件。' }
-  return await gitSyncManager.push(state.envelope)
+// 渲染层只提交逐条选择，读取、合并和落盘统一由主进程处理。
+ipcMain.handle('git-sync-prepare', async (event, options = {}) => {
+  if (gitSyncBusy) return { success: false, error: '已有同步任务，请先完成或取消。' }
+  gitSyncBusy = true
+  gitOperationRunning = true
+  let prepared = false
+  try {
+    await vaultMutationTail
+    await vaultSession.requireData()
+    let importData
+    if (options.mode === 'import') {
+      // 是否免二次验证由主进程设置决定，不能信任渲染层传入的标志。
+      const imported = await fileManager.importEncryptedVault(mainWindow, options.password, { useSession: vaultSession.getStatus().idleTimeoutMinutes === 0 })
+      if (!imported.success) return imported
+      importData = imported.data
+    }
+    const result = await gitSyncManager.prepareSync({ mode: options.mode, password: options.password, importData })
+    prepared = result.success
+    return result
+  } catch (error) { return { success: false, error: error.message } }
+  finally {
+    gitOperationRunning = false
+    if (!prepared) gitSyncBusy = false
+  }
 })
-ipcMain.handle('git-sync-pull', async (event, password) => {
-  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
-  return await gitSyncManager.pull(password)
+ipcMain.handle('git-sync-complete', async (event, token, resolutions) => {
+  if (!gitSyncBusy || gitOperationRunning) return { success: false, error: '没有待确认的同步任务。' }
+  gitOperationRunning = true
+  try {
+    await vaultSession.requireData()
+    return await gitSyncManager.completeSync(token, resolutions)
+  } catch (error) { return { success: false, error: error.message } }
+  finally { gitOperationRunning = false; gitSyncBusy = false }
 })
-ipcMain.handle('git-sync-confirm-pull', async (event, commit) => {
-  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
-  return await gitSyncManager.confirmPull(commit)
+ipcMain.handle('git-sync-cancel', () => {
+  if (gitOperationRunning) return { success: false, error: '正在执行同步，请稍候。' }
+  gitSyncBusy = false
+  fileManager.cancelImport()
+  return gitSyncManager.cancelSync()
 })
+ipcMain.handle('git-sync-snapshots', async () => {
+  if (vaultSession.getStatus().state !== 'unlocked') return { success: false, error: '密码库尚未解锁。' }
+  return await gitSyncManager.listSnapshots()
+})
+ipcMain.handle('git-sync-restore', async (event, id) => {
+  if (gitSyncBusy) return { success: false, error: '请先完成或取消同步。' }
+  gitSyncBusy = true
+  gitOperationRunning = true
+  try {
+    await vaultMutationTail
+    await vaultSession.requireData()
+    return await gitSyncManager.restoreSnapshot(id)
+  } catch (error) { return { success: false, error: error.message } }
+  finally { gitOperationRunning = false; gitSyncBusy = false }
+})
+
 ipcMain.handle('native-host-status', async () => {
   return await nativeHostManager.getStatus()
 })

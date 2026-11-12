@@ -8,6 +8,7 @@ import AppDialog from './components/AppDialog'
 import VaultUnlock from './components/VaultUnlock'
 import BrowserExtensionSettings from './components/BrowserExtensionSettings'
 import GitSyncSettings from './components/GitSyncSettings'
+import GitSyncDialog from './components/GitSyncDialog'
 import { useVaultSession } from './hooks/useVaultSession'
 import iconOne from './images/icon-1.png'
 import iconTwo from './images/icon-2.png'
@@ -73,12 +74,18 @@ function App() {
   const [gitSyncAction, setGitSyncAction] = useState(null)
   const [gitSyncFeedback, setGitSyncFeedback] = useState(null)
   const gitSyncInFlightRef = useRef(false)
+  const syncWriteBlockedRef = useRef(false)
+  const syncEpochRef = useRef(0)
+  const [syncDialog, setSyncDialog] = useState(null)
   // 侧边栏收起状态只影响界面布局，不属于业务数据，保存在本地组件状态里即可避免写入用户数据文件。
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth <= SIDEBAR_AUTO_COLLAPSE_WIDTH : false
   ))
   const saveTimerRef = useRef(null)
   const latestDataRef = useRef(null)
+  const savedDataRef = useRef(null)
+  const saveChainRef = useRef(Promise.resolve())
+  const vaultEpochRef = useRef(0)
   const dataWriteProtectedRef = useRef(false)
 
   useEffect(() => {
@@ -117,7 +124,15 @@ function App() {
 
   useEffect(() => {
     if (vaultStatus.state !== 'unlocked' || !vaultData) {
+      vaultEpochRef.current++
+      syncEpochRef.current++
+      gitSyncInFlightRef.current = false
+      syncWriteBlockedRef.current = false
+      setSyncDialog(null)
+      setGitSyncAction(null)
+      setGitSyncFeedback(null)
       latestDataRef.current = null
+      savedDataRef.current = null
       setData(null)
       setActiveTabId(null)
       return
@@ -133,6 +148,7 @@ function App() {
     }
     dataWriteProtectedRef.current = false
     latestDataRef.current = loaded
+    savedDataRef.current = vaultData
     setData(loaded)
     setActiveTabId(loaded.tabs[0]?.id || null)
   }, [vaultData, vaultStatus.state])
@@ -174,13 +190,32 @@ function App() {
 
   const writeDataNow = useCallback(async (targetData = latestDataRef.current) => {
     if (!window.electronAPI?.writeVaultData || !targetData) return { success: true, skipped: true }
+    // 同步期间禁止旧编辑快照自动保存，关闭窗口或退出也不例外。
+    if (syncWriteBlockedRef.current) return { success: true, skipped: true }
     if (dataWriteProtectedRef.current) {
       // 读取失败后的保护模式禁止自动写盘，防止空白默认数据覆盖用户原始保险箱文件。
       showStatus('数据读取失败，已暂停自动保存')
       return { success: false, protected: true }
     }
 
-    const result = await window.electronAPI.writeVaultData(targetData)
+    const epoch = vaultEpochRef.current
+    const task = saveChainRef.current.then(async () => {
+      if (epoch !== vaultEpochRef.current || syncWriteBlockedRef.current || !savedDataRef.current) return { success: true, skipped: true }
+      // 旧 preload 只转发首参数，因此在首参数内也携带基线；归一化保存时不会写入该传输字段。
+      const result = await window.electronAPI.writeVaultData({ ...targetData, __saveBase: savedDataRef.current }, savedDataRef.current)
+      if (result?.success && epoch === vaultEpochRef.current) {
+        // 仍在编辑时保留后续输入；下一次保存基于本次提交的界面快照继续合并。
+        savedDataRef.current = targetData
+        if (latestDataRef.current === targetData && result.data) {
+          latestDataRef.current = result.data
+          savedDataRef.current = result.data
+          setData(result.data)
+        }
+      }
+      return result
+    })
+    saveChainRef.current = task.catch(() => {})
+    const result = await task
     if (result?.success === false) {
       showInfo({
         type: 'error',
@@ -222,6 +257,11 @@ function App() {
   }, [showStatus, writeDataNow])
 
   const updateData = useCallback((newData) => {
+    if (gitSyncInFlightRef.current) return
+    const previous = latestDataRef.current
+    if (previous && (newData.tabs !== previous.tabs || newData.notepads !== previous.notepads)) {
+      setGitSyncFeedback({ type: 'info', text: '有本地修改，尚未同步。' })
+    }
     latestDataRef.current = newData
     setData(newData)
     scheduleSave(newData)
@@ -231,11 +271,13 @@ function App() {
     if (!window.electronAPI?.onVaultCredentialUpdated) return undefined
     return window.electronAPI.onVaultCredentialUpdated(update => {
       if (!update?.accountId || typeof update.newPassword !== 'string' || !latestDataRef.current) return
+      const baseline = savedDataRef.current?.tabs.flatMap(tab => tab.accounts || []).find(account => account.id === update.accountId)
       const updatedData = {
         ...latestDataRef.current,
         tabs: latestDataRef.current.tabs.map(tab => ({
           ...tab,
-          accounts: (tab.accounts || []).map(account => account.id === update.accountId
+          // 本地未保存的同字段修改留给主进程判断，不能先被插件事件从内存中抹掉。
+          accounts: (tab.accounts || []).map(account => account.id === update.accountId && (account.password === baseline?.password || account.password === update.newPassword)
             ? { ...account, password: update.newPassword, updatedAt: update.updatedAt }
             : account),
         })),
@@ -271,9 +313,10 @@ function App() {
       if (!tabId || !tabName || !latestDataRef.current) return
       // 插件已将改名写入密码库，同步当前编辑快照以免自动保存覆盖新名称。
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const baseline = savedDataRef.current?.tabs.find(tab => tab.id === tabId)
       const updatedData = {
         ...latestDataRef.current,
-        tabs: latestDataRef.current.tabs.map(tab => tab.id === tabId ? { ...tab, name: tabName } : tab),
+        tabs: latestDataRef.current.tabs.map(tab => tab.id === tabId && (tab.name === baseline?.name || tab.name === tabName) ? { ...tab, name: tabName } : tab),
       }
       latestDataRef.current = updatedData
       setData(updatedData)
@@ -662,239 +705,136 @@ function App() {
     }
   }, [data, flushScheduledSave, showInfo, showStatus])
 
-  const handleImport = useCallback(async (password, notepadMode, importResult) => {
-    if (!window.electronAPI) return showStatus('仅 Electron 环境支持导入')
-    const currentData = latestDataRef.current || data
-    await flushScheduledSave(currentData)
-    const result = importResult || await window.electronAPI.importEncryptedVault(password)
-    if (result.success) {
-      const existing = [...currentData.tabs]
-      const imported = result.data.tabs || []
-      let addedAccounts = 0
-      let addedUrls = 0
-      let addedNotepads = 0
-      let overwrittenNotepads = 0
-      let skippedAccounts = 0
-      let skippedUrls = 0
-      for (const tab of imported) {
-        const found = existing.find(t => t.name === tab.name)
-        if (found) {
-          const existingAccountNames = new Set(
-            (found.accounts || []).map(a => a.accountName?.trim().toLowerCase())
-          )
-          const existingUsernames = new Set(
-            (found.accounts || []).map(a => a.username?.trim().toLowerCase()).filter(Boolean)
-          )
-          const existingUrlNames = new Set(
-            (found.urls || []).map(u => u.name?.trim().toLowerCase())
-          )
-          for (const acc of (tab.accounts || [])) {
-            const nameKey = acc.accountName?.trim().toLowerCase()
-            const userKey = acc.username?.trim().toLowerCase()
-            if (existingAccountNames.has(nameKey) || (userKey && existingUsernames.has(userKey))) {
-              skippedAccounts++
-            } else {
-              found.accounts = [...(found.accounts || []), { ...acc, id: generateId() }]
-              existingAccountNames.add(nameKey)
-              if (userKey) existingUsernames.add(userKey)
-              addedAccounts++
-            }
-          }
-          for (const url of (tab.urls || [])) {
-            if (existingUrlNames.has(url.name?.trim().toLowerCase())) {
-              skippedUrls++
-            } else {
-              found.urls = [...(found.urls || []), { ...url, id: generateId() }]
-              existingUrlNames.add(url.name?.trim().toLowerCase())
-              addedUrls++
-            }
-          }
-        } else {
-          const newTab = { ...tab, id: generateId() }
-          addedAccounts += (tab.accounts || []).length
-          addedUrls += (tab.urls || []).length
-          existing.push(newTab)
-        }
-      }
-      const existingNotepads = [...(currentData.notepads || [])]
-      let activeNotepadId = currentData.activeNotepadId
-      for (const note of (result.data.notepads || [])) {
-        const name = note.name || `记事本 ${existingNotepads.length + 1}`
-        const content = note.content || ''
-        const nameKey = name.trim().toLowerCase()
-        const matchingIndexes = existingNotepads.reduce((indexes, item, index) => {
-          if (item.name?.trim().toLowerCase() === nameKey) indexes.push(index)
-          return indexes
-        }, [])
-        if (notepadMode === 'overwrite' && matchingIndexes.length > 0) {
-          // 同名记事本保留首个标签的 ID 和位置，同时清理此前导入产生的同名副本。
-          const firstIndex = matchingIndexes[0]
-          const firstId = existingNotepads[firstIndex].id
-          if (matchingIndexes.some(index => existingNotepads[index].id === activeNotepadId)) activeNotepadId = firstId
-          existingNotepads[firstIndex] = { ...note, id: firstId, name, content }
-          for (let index = matchingIndexes.length - 1; index > 0; index--) {
-            existingNotepads.splice(matchingIndexes[index], 1)
-          }
-          overwrittenNotepads++
-        } else {
-          existingNotepads.push({
-            ...note,
-            id: generateId(),
-            name,
-            content,
-          })
-          addedNotepads++
-        }
-      }
-      const importedTheme = result.data.theme
-      const importedCustomThemeId = getCustomThemeId(importedTheme)
-      const canUseImportedTheme = BUILT_IN_THEME_VALUES.has(importedTheme) ||
-        (importedCustomThemeId && customThemes.some(theme => theme.id === importedCustomThemeId))
-      // 数据备份不包含本机自定义主题定义；如果备份里只有 custom:<id> 引用但本机没有该主题，就保留当前可用主题。
-      dataWriteProtectedRef.current = false
-      const mergedData = {
-        ...currentData,
-        theme: canUseImportedTheme ? importedTheme : (currentData.theme || 'secure'),
-        tabs: existing,
-        notepads: existingNotepads,
-        activeNotepadId: existingNotepads.some(note => note.id === activeNotepadId)
-          ? activeNotepadId : existingNotepads[0]?.id || null,
-      }
-      latestDataRef.current = mergedData
-      updateData(mergedData)
-      if (importResult) {
-        const saved = await flushScheduledSave(mergedData)
-        if (saved?.success === false) return { success: false }
-      }
-      const parts = [`新增 ${addedAccounts} 个账号，${addedUrls} 个网址，${addedNotepads} 个记事本`]
-      if (overwrittenNotepads > 0) parts.push(`覆盖 ${overwrittenNotepads} 个同名记事本`)
-      if (skippedAccounts > 0 || skippedUrls > 0) {
-        const skipParts = []
-        if (skippedAccounts > 0) skipParts.push(`${skippedAccounts} 个账号`)
-        if (skippedUrls > 0) skipParts.push(`${skippedUrls} 个网址`)
-        parts.push(`跳过 ${skipParts.join('、')}（已存在）`)
-      }
-      showInfo({
-        type: 'success',
-        title: '密码保险箱',
-        message: '导入成功！',
-        detail: parts.join('\n'),
-      })
-      return { success: true }
-    } else if (!result.cancelled) {
-      showInfo({
-        type: 'error',
-        title: '密码保险箱',
-        message: '导入失败: ' + result.error,
-      })
-    }
-  }, [customThemes, data, flushScheduledSave, updateData, showInfo, showStatus])
+  const releaseSync = useCallback(() => {
+    gitSyncInFlightRef.current = false
+    syncWriteBlockedRef.current = false
+    setGitSyncAction(null)
+    setSyncDialog(null)
+  }, [])
 
-  const requestImport = useCallback(() => {
-    showPasswordPrompt({
-      title: '导入 JSON 备份',
-      message: '加密备份请输入备份密码；明文备份请输入当前密码库的主密码。',
-      detail: '程序会根据文件内容识别备份格式，并在本机验证密码。覆盖会用备份内容替换同名记事本，并清理已有的同名副本。',
-      selectLabel: '同名记事本的处理方式',
-      selectDefault: 'overwrite',
-      selectOptions: [
-        { value: 'overwrite', label: '覆盖已有同名记事本（推荐）' },
-        { value: 'duplicate', label: '重复导入为新记事本' },
-      ],
-    }, handleImport)
-  }, [handleImport, showPasswordPrompt])
+  const applySyncedData = useCallback((savedData) => {
+    if (!savedData || !latestDataRef.current) return
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    latestDataRef.current = savedData
+    savedDataRef.current = savedData
+    setData(savedData)
+    setActiveTabId(previous => savedData.tabs.some(tab => tab.id === previous) ? previous : savedData.tabs[0]?.id || null)
+  }, [])
 
-  const handleGitPush = useCallback(async () => {
-    if (gitSyncInFlightRef.current) return
-    gitSyncInFlightRef.current = true
-    setGitSyncAction('push')
-    setGitSyncFeedback({ type: 'info', text: '正在保存本地数据...' })
+  const completeSync = useCallback(async (token, resolutions = {}, epoch = syncEpochRef.current) => {
+    setSyncDialog({ stage: 'working', message: '正在创建加密备份、保存合并结果并完成同步...' })
     try {
-      const saved = await flushScheduledSave(latestDataRef.current || data)
-      if (saved?.success === false) {
-        setGitSyncFeedback({ type: 'error', text: 'Git 导出未开始：本地数据保存失败。' })
+      const result = await window.electronAPI.completeGitSync(token, resolutions)
+      if (epoch !== syncEpochRef.current) return
+      applySyncedData(result.data)
+      if (!result.success) throw new Error(result.error)
+      const operation = result.mode === 'import' ? '文件导入完成' : result.mode === 'pull' ? '拉取合并完成，本地修改尚未上传' : '同步完成'
+      const stats = result.stats
+      const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      setGitSyncFeedback({ type: 'success', text: `${time} ${operation}：跳过 ${stats.skipped} 项一致数据，新增 ${stats.added} 项${result.uploaded ? '，已上传' : ''}。` })
+    } catch (error) {
+      if (epoch !== syncEpochRef.current) return
+      setGitSyncFeedback({ type: 'error', text: `同步未完成：${error.message}` })
+      showInfo({ type: 'error', title: '同步未完成', message: error.message, detail: '已保存的本地修改和加密备份会保留，请重新同步。' })
+    } finally {
+      if (epoch === syncEpochRef.current) releaseSync()
+    }
+  }, [applySyncedData, releaseSync, showInfo])
+
+  const runSync = useCallback(async (mode = 'sync', password) => {
+    if (gitSyncInFlightRef.current) return
+    if (!window.electronAPI?.prepareGitSync) {
+      const saved = await flushScheduledSave()
+      if (saved?.success !== false) showInfo({ type: 'warning', title: '需要重启 Electron', message: '当前修改已保存。请从托盘完整退出后重新启动，以加载新版同步接口。' })
+      return
+    }
+    gitSyncInFlightRef.current = true
+    const epoch = ++syncEpochRef.current
+    setGitSyncAction(mode)
+    setStatusMsg('')
+    setGitSyncFeedback({ type: 'info', text: '正在保存并比较数据...' })
+    setSyncDialog({ stage: 'working', message: mode === 'import' ? '正在读取备份并比较数据...' : '正在连接 Git 仓库并比较数据...' })
+    try {
+      const saved = await flushScheduledSave()
+      if (saved?.success === false) throw new Error('本地数据保存失败，未开始同步。')
+      syncWriteBlockedRef.current = true
+      const result = await window.electronAPI.prepareGitSync({ mode, password })
+      if (epoch !== syncEpochRef.current) return
+      if (result.cancelled) { releaseSync(); setGitSyncFeedback(null); return }
+      if (result.needsPassword) {
+        setSyncDialog({ stage: 'password', mode, message: result.error })
         return
       }
-      setGitSyncFeedback({ type: 'info', text: '正在连接仓库并推送加密密码库...' })
-      const result = await window.electronAPI.pushGitVault()
-      setGitSyncFeedback(result.success
-        ? { type: 'success', text: result.unchanged ? 'Git 导出完成：远端已是最新版本。' : 'Git 导出成功：已推送加密密码库。' }
-        : { type: 'error', text: `Git 导出失败：${result.error}` })
-      showInfo(result.success
-        ? { type: 'success', title: 'Git 导出完成', message: result.unchanged ? '远端密码库已经是最新版本。' : '加密密码库已推送到仓库。' }
-        : { type: 'error', title: 'Git 导出失败', message: result.error })
+      if (!result.success) throw new Error(result.error)
+      if (result.conflicts.length) {
+        setGitSyncFeedback({ type: 'info', text: `待处理 ${result.conflicts.length} 项冲突。` })
+        setSyncDialog({ ...result, mode, stage: 'conflicts' })
+      } else await completeSync(result.token, {}, epoch)
     } catch (error) {
-      setGitSyncFeedback({ type: 'error', text: `Git 导出失败：${error.message}` })
-      showInfo({ type: 'error', title: 'Git 导出失败', message: error.message })
-    } finally {
-      gitSyncInFlightRef.current = false
-      setGitSyncAction(null)
+      if (epoch !== syncEpochRef.current) return
+      await window.electronAPI.cancelGitSync()
+      releaseSync()
+      setGitSyncFeedback({ type: 'error', text: `同步未开始：${error.message}` })
+      showInfo({ type: 'error', title: '同步未开始', message: error.message })
     }
-  }, [data, flushScheduledSave, showInfo])
+  }, [completeSync, flushScheduledSave, releaseSync, showInfo])
 
-  const handleGitPull = useCallback(() => {
-    showPasswordPrompt({
-      title: '从 Git 导入加密密码库',
-      message: '输入远端备份的主密码。导入会合并本地数据，请先确认当前修改已经保存。',
-      selectLabel: '同名记事本的处理方式',
-      selectDefault: 'overwrite',
-      selectOptions: [
-        { value: 'overwrite', label: '覆盖已有同名记事本' },
-        { value: 'duplicate', label: '重复导入为新记事本' },
-      ],
-    }, async (password, notepadMode) => {
-      if (gitSyncInFlightRef.current) return
-      gitSyncInFlightRef.current = true
-      setGitSyncAction('pull')
-      setGitSyncFeedback({ type: 'info', text: '正在保存本地数据...' })
-      try {
-        const saved = await flushScheduledSave(latestDataRef.current || data)
-        if (saved?.success === false) {
-          setGitSyncFeedback({ type: 'error', text: 'Git 导入未开始：本地数据保存失败。' })
-          return
-        }
-        setGitSyncFeedback({ type: 'info', text: '正在连接仓库并拉取加密密码库...' })
-        const result = await window.electronAPI.pullGitVault(password)
-        if (!result.success) {
-          setGitSyncFeedback({ type: 'error', text: `Git 导入失败：${result.error}` })
-          showInfo({ type: 'error', title: 'Git 导入失败', message: result.error })
-          return
-        }
-        if (result.unchanged) {
-          setGitSyncFeedback({ type: 'info', text: 'Git 导入完成：远端没有新版本。' })
-          showInfo({ type: 'info', title: 'Git 导入', message: '远端密码库没有新版本。' })
-          return
-        }
-        setGitSyncFeedback({ type: 'info', text: '正在合并并保存导入数据...' })
-        const imported = await handleImport(password, notepadMode, result)
-        if (imported?.success) {
-          const confirmed = await window.electronAPI.confirmGitPull(result.commit)
-          if (!confirmed.success) {
-            setGitSyncFeedback({ type: 'error', text: `数据已导入，但同步状态保存失败：${confirmed.error}` })
-            showInfo({ type: 'error', title: 'Git 同步状态保存失败', message: confirmed.error })
-          } else {
-            setGitSyncFeedback({ type: 'success', text: 'Git 导入成功：远端数据已合并并保存。' })
-          }
-        } else {
-          setGitSyncFeedback({ type: 'error', text: 'Git 导入失败：合并后的本地数据未能保存。' })
-        }
-      } catch (error) {
-        setGitSyncFeedback({ type: 'error', text: `Git 导入失败：${error.message}` })
-        showInfo({ type: 'error', title: 'Git 导入失败', message: error.message })
-      } finally {
-        gitSyncInFlightRef.current = false
-        setGitSyncAction(null)
-      }
-    })
-  }, [data, flushScheduledSave, handleImport, showInfo, showPasswordPrompt])
+  const cancelSync = useCallback(async () => {
+    const result = await window.electronAPI.cancelGitSync()
+    if (!result.success) return showInfo({ type: 'error', title: '取消失败', message: result.error })
+    syncEpochRef.current++
+    releaseSync()
+    setGitSyncFeedback({ type: 'info', text: '已关闭，本地数据保持不变。' })
+  }, [releaseSync, showInfo])
+
+  const showSyncHistory = useCallback(async () => {
+    if (gitSyncInFlightRef.current) return
+    gitSyncInFlightRef.current = true
+    const epoch = ++syncEpochRef.current
+    setGitSyncAction('history')
+    setSyncDialog({ stage: 'working', message: '正在读取同步备份...' })
+    try {
+      const saved = await flushScheduledSave()
+      if (saved?.success === false) throw new Error('本地数据保存失败。')
+      syncWriteBlockedRef.current = true
+      const result = await window.electronAPI.listSyncSnapshots()
+      if (epoch !== syncEpochRef.current) return
+      if (!result.success) throw new Error(result.error)
+      setSyncDialog({ stage: 'history', snapshots: result.snapshots })
+    } catch (error) {
+      if (epoch !== syncEpochRef.current) return
+      releaseSync()
+      showInfo({ type: 'error', title: '读取备份失败', message: error.message })
+    }
+  }, [flushScheduledSave, releaseSync, showInfo])
+
+  const restoreSyncSnapshot = useCallback(async id => {
+    const epoch = syncEpochRef.current
+    setSyncDialog({ stage: 'working', message: '正在备份当前数据并恢复所选版本...' })
+    try {
+      const result = await window.electronAPI.restoreSyncSnapshot(id)
+      if (epoch !== syncEpochRef.current) return
+      if (!result.success) throw new Error(result.error)
+      applySyncedData(result.data)
+      setGitSyncFeedback({ type: 'success', text: '备份已恢复到本地，尚未上传。请检查数据后同步。' })
+    } catch (error) {
+      if (epoch !== syncEpochRef.current) return
+      showInfo({ type: 'error', title: '恢复失败', message: error.message })
+    } finally { if (epoch === syncEpochRef.current) releaseSync() }
+  }, [applySyncedData, releaseSync, showInfo])
+
+  const requestImport = useCallback(() => {
+    // 安全环境直接选择文件；只有备份使用不同密码时才按需提示。
+    if (vaultStatus.idleTimeoutMinutes === 0) {
+      runSync('import')
+      return
+    }
+    showPasswordPrompt({ title: '安全导入 JSON 备份', message: '加密备份请输入备份密码；明文备份请输入当前主密码。',
+      detail: '名称和内容一致的数据自动跳过；差异逐条确认，写入前自动备份，不改变 Git 同步基线。' }, password => runSync('import', password))
+  }, [runSync, showPasswordPrompt, vaultStatus.idleTimeoutMinutes])
 
   const handlePlaintextExport = useCallback(() => {
-    showPasswordPrompt({
-      title: '危险操作：导出明文',
-      message: '明文文件会直接包含账号、密码和 Token。请输入当前主密码继续。',
-      detail: '请只保存到可信位置，并在使用后安全删除该文件。',
-      confirmText: '确认明文导出',
-    }, async password => {
+    const exportWithPassword = async password => {
       const flushResult = await flushScheduledSave(latestDataRef.current || data)
       if (flushResult?.success === false) return
       const result = await window.electronAPI.exportPlaintextVault(password)
@@ -903,8 +843,18 @@ function App() {
       } else if (!result?.cancelled) {
         showInfo({ type: 'error', title: '明文导出失败', message: result?.error || '无法导出。' })
       }
-    })
-  }, [data, flushScheduledSave, showInfo, showPasswordPrompt])
+    }
+    if (vaultStatus.idleTimeoutMinutes === 0) {
+      void exportWithPassword()
+      return
+    }
+    showPasswordPrompt({
+      title: '危险操作：导出明文',
+      message: '明文文件会直接包含账号、密码和 Token。请输入当前主密码继续。',
+      detail: '请只保存到可信位置，并在使用后安全删除该文件。',
+      confirmText: '确认明文导出',
+    }, exportWithPassword)
+  }, [data, flushScheduledSave, showInfo, showPasswordPrompt, vaultStatus.idleTimeoutMinutes])
 
   const themeOptions = useMemo(() => [
     ...BUILT_IN_THEME_OPTIONS,
@@ -1026,11 +976,24 @@ function App() {
         onPlaintextExport={handlePlaintextExport}
         onBrowserSettings={() => setIsBrowserSettingsOpen(true)}
         onGitSettings={() => { setGitSyncFeedback(null); setIsGitSettingsOpen(true) }}
-        onGitPush={handleGitPush}
-        onGitPull={handleGitPull}
+        onGitSync={() => runSync('sync')}
+        onGitPush={() => runSync('push')}
+        onGitPull={() => runSync('pull')}
+        onSyncHistory={showSyncHistory}
         gitSyncAction={gitSyncAction}
         gitSyncFeedback={gitSyncFeedback}
       />
+      {syncDialog && <GitSyncDialog key={syncDialog.token || syncDialog.stage} model={syncDialog}
+        onCancel={cancelSync}
+        onResolve={resolutions => completeSync(syncDialog.token, resolutions)}
+        onPassword={password => {
+          const mode = syncDialog.mode
+          gitSyncInFlightRef.current = false
+          syncWriteBlockedRef.current = false
+          runSync(mode, password)
+        }}
+        onRestore={restoreSyncSnapshot}
+      />}
       <AppDialog dialog={dialog} onClose={closeDialog} onConfirm={confirmDialog} />
       {isBrowserSettingsOpen && (
         <BrowserExtensionSettings

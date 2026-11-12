@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('vault-tab-renamed', listener)
     return () => ipcRenderer.removeListener('vault-tab-renamed', listener)
   },
-  writeVaultData: (data) => ipcRenderer.invoke('vault-write-data', data),
+  writeVaultData: (data, baseData) => ipcRenderer.invoke('vault-write-data', data, baseData),
   copySecret: (value, ttlMs = 30_000) => ipcRenderer.invoke('vault-copy-secret', value, ttlMs),
   normalizeWebsiteTarget: (value) => ipcRenderer.invoke('login-target-normalize-website', value),
   selectExecutableTarget: () => ipcRenderer.invoke('login-target-select-executable'),
@@ -50,9 +50,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getGitSyncSettings: () => ipcRenderer.invoke('git-sync-settings'),
   saveGitSyncSettings: (settings) => ipcRenderer.invoke('git-sync-save-settings', settings),
   testGitConnection: () => ipcRenderer.invoke('git-sync-test-connection'),
-  pushGitVault: () => ipcRenderer.invoke('git-sync-push'),
-  pullGitVault: (password) => ipcRenderer.invoke('git-sync-pull', password),
-  confirmGitPull: (commit) => ipcRenderer.invoke('git-sync-confirm-pull', commit),
+  prepareGitSync: options => ipcRenderer.invoke('git-sync-prepare', options),
+  completeGitSync: (token, resolutions) => ipcRenderer.invoke('git-sync-complete', token, resolutions),
+  cancelGitSync: () => ipcRenderer.invoke('git-sync-cancel'),
+  listSyncSnapshots: () => ipcRenderer.invoke('git-sync-snapshots'),
+  restoreSyncSnapshot: id => ipcRenderer.invoke('git-sync-restore', id),
   getNativeHostStatus: () => ipcRenderer.invoke('native-host-status'),
   registerNativeHost: (extensionIds) => ipcRenderer.invoke('native-host-register', extensionIds),
   unregisterNativeHost: () => ipcRenderer.invoke('native-host-unregister'),

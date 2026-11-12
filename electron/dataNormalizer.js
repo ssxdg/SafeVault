@@ -3,6 +3,48 @@ const {
   normalizeExecutablePath,
   isSafeWindowTitlePattern,
 } = require('./credentialMatcher')
+const { createHash } = require('crypto')
+
+// 旧导入会跨分类复用 ID。只修复重复的标识，保留全部条目、顺序和内容。
+// 使用稳定的业务身份生成后缀，避免远端旧文件每次读取都得到不同 ID 而反复新增副本。
+function repairDuplicateIds(data) {
+  if (!data || typeof data !== 'object') return data
+  const tabs = Array.isArray(data.tabs) ? data.tabs : []
+  const groups = {
+    tab: tabs,
+    account: tabs.flatMap(tab => Array.isArray(tab.accounts) ? tab.accounts : []),
+    url: tabs.flatMap(tab => Array.isArray(tab.urls) ? tab.urls : []),
+    note: Array.isArray(data.notepads) ? data.notepads : [],
+  }
+  const reserved = Object.fromEntries(Object.entries(groups).map(([type, items]) => [type, new Set(items.map(item => String(item.id)))]))
+  const used = Object.fromEntries(Object.keys(groups).map(type => [type, new Set()]))
+  const claimId = (type, item, scope = '') => {
+    const id = item.id
+    if (!id) return id
+    if (!used[type].has(String(id))) { used[type].add(String(id)); return id }
+    const identity = [scope, item.name ?? item.accountName ?? '',
+      type === 'account' ? [item.username || '', item.loginUrl || ''] : type === 'url' ? item.url || '' : '']
+    const suffix = createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 16)
+    const prefix = `${id}-repaired-${suffix}`
+    let candidate = prefix
+    let serial = 2
+    // 预留原数据中全部 ID，不能覆盖后面尚未处理的合法条目。
+    while (reserved[type].has(candidate) || used[type].has(candidate)) candidate = `${prefix}-${serial++}`
+    used[type].add(candidate)
+    return candidate
+  }
+  return {
+    ...data,
+    ...(Array.isArray(data.tabs) ? { tabs: data.tabs.map(tab => {
+      const id = claimId('tab', tab)
+      return { ...tab, id,
+        ...(Array.isArray(tab.accounts) ? { accounts: tab.accounts.map(item => ({ ...item, id: claimId('account', item, id) })) } : {}),
+        ...(Array.isArray(tab.urls) ? { urls: tab.urls.map(item => ({ ...item, id: claimId('url', item, id) })) } : {}),
+      }
+    }) } : {}),
+    ...(Array.isArray(data.notepads) ? { notepads: data.notepads.map(item => ({ ...item, id: claimId('note', item) })) } : {}),
+  }
+}
 
 const EMPTY_DELTA = { ops: [{ insert: '\n' }] }
 const VALID_THEMES = new Set(['secure', 'compact', 'warm'])
@@ -167,7 +209,7 @@ function normalizeTabs(tabs, migrateLegacyLoginUrl) {
 }
 
 function normalizeNotepads(data) {
-  if (Array.isArray(data?.notepads) && data.notepads.length > 0) {
+  if (Array.isArray(data?.notepads)) {
     return data.notepads.map((note, index) => ({
       id: note.id || `note-${Date.now()}-${index}`,
       name: note.name || `Note ${index + 1}`,
@@ -188,27 +230,33 @@ function normalizeNotepads(data) {
 }
 
 function normalizeData(data) {
-  const source = data && typeof data === 'object' ? data : {}
+  const source = data && typeof data === 'object' ? repairDuplicateIds(data) : {}
   const sourceSchemaVersion = Number(source.schemaVersion)
   const migrateLegacyLoginUrl = !Number.isFinite(sourceSchemaVersion) || sourceSchemaVersion < 3
   const tabs = normalizeTabs(source.tabs, migrateLegacyLoginUrl)
   const notepads = normalizeNotepads(source)
   const activeNotepadId = notepads.some(note => note.id === source.activeNotepadId)
     ? source.activeNotepadId
-    : notepads[0].id
+    : notepads[0]?.id || null
 
-  return {
+  return repairDuplicateIds({
     schemaVersion: 3,
     theme: normalizeTheme(source.theme),
     tabs,
     notepads,
     activeNotepadId,
-  }
+    // 删除记录随加密业务数据同步，防止离线旧设备把已删除条目重新导入。
+    ...(Array.isArray(source.syncTombstones) ? { syncTombstones: source.syncTombstones.filter(item =>
+      item && ['tab', 'note', 'account', 'url'].includes(item.type) && typeof item.id === 'string'
+      && typeof item.hash === 'string' && /^[a-f0-9]{64}$/.test(item.hash)
+    ).map(({ type, id, hash, deletedAt }) => ({ type, id, hash, deletedAt })) } : {}),
+  })
 }
 
 module.exports = {
   EMPTY_DELTA,
   normalizeData,
+  repairDuplicateIds,
   normalizeNoteContent,
   normalizeTheme,
   stableSortByUseCount,

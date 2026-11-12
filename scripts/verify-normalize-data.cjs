@@ -1,6 +1,38 @@
 const assert = require('assert')
 const { normalizeData } = require('../electron/dataNormalizer')
 
+// 旧导入可能在分类之间复用账号、网址 ID，同一分类也可能已有重复项；修复不得删除正文或账号。
+const duplicateSource = {
+  schemaVersion: 3,
+  tabs: [
+    { id: 'same-tab', name: '分类甲', accounts: [{ id: 'same-account', accountName: '账号甲', password: '甲' }], urls: [{ id: 'same-url', name: '网址甲' }] },
+    { id: 'same-tab', name: '分类乙', accounts: [{ id: 'same-account', accountName: '账号乙', password: '乙' }, { id: 'same-account', accountName: '账号丙', password: '丙' }], urls: [{ id: 'same-url', name: '网址乙' }] },
+  ],
+  notepads: [{ id: 'same-note', name: '笔记甲', content: '内容甲' }, { id: 'same-note', name: '笔记乙', content: '内容乙' }],
+  activeNotepadId: 'same-note',
+}
+const duplicateOriginal = JSON.stringify(duplicateSource)
+const repaired = normalizeData(duplicateSource)
+for (const records of [repaired.tabs, repaired.tabs.flatMap(tab => tab.accounts), repaired.tabs.flatMap(tab => tab.urls), repaired.notepads]) {
+  assert.strictEqual(new Set(records.map(item => item.id)).size, records.length)
+}
+assert.deepStrictEqual(repaired.tabs.flatMap(tab => tab.accounts).map(item => item.password), ['甲', '乙', '丙'])
+assert.deepStrictEqual(repaired.notepads.map(item => item.content.ops[0].insert), ['内容甲\n', '内容乙\n'])
+assert.strictEqual(repaired.activeNotepadId, repaired.notepads[0].id)
+assert.deepStrictEqual(normalizeData(duplicateSource), repaired)
+assert.deepStrictEqual(normalizeData(repaired), repaired)
+assert.strictEqual(JSON.stringify(duplicateSource), duplicateOriginal)
+const reservedCollision = structuredClone(duplicateSource)
+reservedCollision.tabs[1].accounts.push({ id: repaired.tabs[1].accounts[0].id, accountName: '原有合法标识', password: '保留' })
+const reservedResult = normalizeData(reservedCollision)
+assert.strictEqual(reservedResult.tabs[1].accounts[2].id, repaired.tabs[1].accounts[0].id)
+assert.strictEqual(new Set(reservedResult.tabs.flatMap(tab => tab.accounts).map(item => item.id)).size, 4)
+const duplicatedDefault = normalizeData({ tabs: [
+  { id: 'default-tab', name: '默认' }, { id: 'default-tab', name: '复制的分类' },
+] })
+assert.strictEqual(duplicatedDefault.tabs[1].name, '复制的分类')
+assert.doesNotThrow(() => normalizeData({ tabs: {}, notepads: 'invalid' }))
+
 const input = {
   schemaVersion: 2,
   theme: 'compact',
