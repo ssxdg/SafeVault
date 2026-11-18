@@ -153,18 +153,35 @@ function alignLegacyIds(local, remote, base) {
   const identity = item => JSON.stringify([item.type, item.parentId || '', item.name ?? item.accountName])
   const known = new Set(base.map(itemKey))
   function align(source, target, type) {
+    // 同一轮按 ID 和业务身份建立索引，避免每个条目都遍历整个密码库。
+    const sourceKeys = new Set(source.map(itemKey))
+    const targetKeys = new Set(target.map(itemKey))
+    const sourceCounts = new Map()
+    const targetMatches = new Map()
+    for (const record of source) {
+      const key = identity(record)
+      sourceCounts.set(key, (sourceCounts.get(key) || 0) + 1)
+    }
+    for (const record of target) {
+      const key = identity(record)
+      // 重名时记录为 null，沿用原有“不自动匹配多个同名项”的规则。
+      targetMatches.set(key, targetMatches.has(key) ? null : record)
+    }
     for (const item of source.filter(record => record.type === type)) {
-      if (target.some(record => itemKey(record) === itemKey(item))) continue
-      const matches = target.filter(record => identity(record) === identity(item))
-      if (matches.length !== 1 || source.filter(record => identity(record) === identity(item)).length !== 1) continue
-      const other = matches[0]
-      if (source.some(record => itemKey(record) === itemKey(other))) continue
+      if (targetKeys.has(itemKey(item))) continue
+      const key = identity(item)
+      const other = targetMatches.get(key)
+      if (!other || sourceCounts.get(key) !== 1) continue
+      if (sourceKeys.has(itemKey(other))) continue
       if (known.has(itemKey(item)) && known.has(itemKey(other))) continue
       // 基线 ID 优先，避免旧版 ID 被误当成“删除旧条目并新建条目”。
       const change = known.has(itemKey(item)) ? other : item
       const collection = change === item ? source : target
+      const collectionKeys = change === item ? sourceKeys : targetKeys
       const oldId = change.id
+      collectionKeys.delete(itemKey(change))
       change.id = change === item ? other.id : item.id
+      collectionKeys.add(itemKey(change))
       if (type === 'tab') {
         for (const child of collection) if (child.parentId === oldId) child.parentId = change.id
       }

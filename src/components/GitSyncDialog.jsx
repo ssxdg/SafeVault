@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Alert, Button, ConfigProvider, Input, Modal, Radio, Select, Spin } from 'antd'
+import { Alert, Button, ConfigProvider, Input, Modal, Pagination, Radio, Select, Space, Spin } from 'antd'
 import ReactQuill from 'react-quill-new'
 
 const previewModules = { toolbar: false }
@@ -43,6 +43,7 @@ function GitSyncDialog({ model, onCancel, onResolve, onPassword, onRestore }) {
   const [resolutions, setResolutions] = useState({})
   const [password, setPassword] = useState('')
   const [snapshotId, setSnapshotId] = useState()
+  const [conflictPage, setConflictPage] = useState(1)
   // 弹窗在当前主题节点内渲染，组件库颜色跟随已有主题变量，不引入另一套配色。
   const tokens = useMemo(() => {
     const style = getComputedStyle(document.querySelector('.app'))
@@ -53,6 +54,13 @@ function GitSyncDialog({ model, onCancel, onResolve, onPassword, onRestore }) {
   const working = model.stage === 'working'
   const passwordLabel = model.mode === 'import' ? '备份密码' : '远端主密码'
   const unresolved = (model.conflicts || []).filter(item => !resolutions[item.key]).length
+  // 每页仅挂载少量富文本预览；选择统一保存在弹窗中，翻页不会丢失。
+  const conflictPageSize = 5
+  const visibleConflicts = (model.conflicts || []).slice((conflictPage - 1) * conflictPageSize, conflictPage * conflictPageSize)
+  const handleResolveAll = choice => {
+    // 批量选择覆盖全部分页，仍由“确认合并”统一提交，允许随后逐项调整。
+    setResolutions(Object.fromEntries(model.conflicts.map(item => [item.key, { choice }])))
+  }
   let footer = null
   if (model.stage === 'conflicts') footer = <>
     <Button onClick={onCancel}>取消同步</Button>
@@ -66,7 +74,16 @@ function GitSyncDialog({ model, onCancel, onResolve, onPassword, onRestore }) {
     {working && <div className="sync-progress" role="status" aria-live="polite"><Spin /><p>{model.message}</p><p>正在处理加密数据，请稍候。</p></div>}
     {model.stage === 'conflicts' && <>
       <Alert type="warning" showIcon title={`有 ${model.conflicts.length} 项冲突需要处理`} description={`一致数据已跳过 ${model.stats?.skipped || 0} 项，单边和可安全合并的修改会自动处理。以下条目无法安全自动合并，或缺少共同基线，需要你选择。确认前不会覆盖本地数据。`} />
-      <div className="sync-conflicts">{model.conflicts.map(item => <ConflictItem key={item.key} item={item} resolution={resolutions[item.key]} onChange={value => setResolutions(previous => ({ ...previous, [item.key]: value }))} />)}</div>
+      <div className="sync-conflict-actions">
+        <Space wrap>
+          <Button onClick={() => handleResolveAll('local')}>全部使用本地数据</Button>
+          <Button onClick={() => handleResolveAll('remote')}>{model.mode === 'import' ? '全部使用导入数据' : '全部使用远程数据'}</Button>
+        </Space>
+        <Pagination size="small" current={conflictPage} pageSize={conflictPageSize} total={model.conflicts.length}
+          hideOnSinglePage showSizeChanger={false} onChange={setConflictPage} />
+      </div>
+      <p className="sync-help">批量选择适用于全部冲突，可继续逐项调整；所选版本已删除的条目将按删除处理。选择后点击“确认合并”保存。</p>
+      <div className="sync-conflicts">{visibleConflicts.map(item => <ConflictItem key={item.key} item={item} resolution={resolutions[item.key]} onChange={value => setResolutions(previous => ({ ...previous, [item.key]: value }))} />)}</div>
     </>}
     {model.stage === 'password' && <>
       <p className="sync-help">{model.message || '远端主密码与本机不同，请输入远端主密码。密码仅用于本次解密。'}</p>

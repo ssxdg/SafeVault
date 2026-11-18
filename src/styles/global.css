@@ -1103,6 +1103,8 @@ body {
 .git-sync-dialog .ant-modal-body { max-height: 65vh; overflow: auto; }
 .sync-progress { text-align: center; padding: 36px 12px; }
 .sync-progress p, .sync-help { margin: 16px 0; color: var(--text-muted); }
+/* 批量操作和分页始终位于列表前，窄窗口自动换行。 */
+.sync-conflict-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
 .sync-conflict { margin-top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
 .sync-conflict h3 { font-size: 15px; margin-bottom: 12px; overflow-wrap: anywhere; }
 .sync-conflict h4 { font-size: 13px; margin-bottom: 8px; color: var(--text-muted); }

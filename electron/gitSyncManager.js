@@ -144,7 +144,8 @@ function createGitSyncManager({ userDataPath, safeStorage, allowLocalRemote = fa
         // SSH 使用本机已配置的密钥和 ssh-agent；禁止弹出无法由应用接管的交互提示。
         env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes'
       }
-      await runGit(['-c', 'credential.helper=', 'clone', '--no-tags', '--', settings.remoteUrl, clonePath], { env })
+      // 合并使用独立保存的加密基线，只需远端最新提交，避免反复下载全部加密历史。
+      await runGit(['-c', 'credential.helper=', 'clone', '--depth', '1', '--single-branch', '--no-tags', '--', settings.remoteUrl, clonePath], { env })
       const head = await runGit(['-C', clonePath, 'rev-parse', '--verify', 'HEAD'], { env }).catch(() => null)
       const result = await action({ settings, clonePath, env, head })
       return result
